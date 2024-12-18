@@ -1,9 +1,10 @@
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
-
+import os
 
 import pandas as pd
+from pandas import ExcelWriter
 
 def fetch_sp500_tickers() -> list:
     """
@@ -131,6 +132,79 @@ def screen_top_gainers(tickers: list, lookback_periods: list) -> pd.DataFrame:
     result_df = result_df.sort_values(by=f"{lookback_periods[0]}_return", ascending=False)
     return result_df
 
+def format_worksheet(workbook, worksheet, combined_df):
+    """
+    Format the worksheet with percentage format and conditional formatting.
+    
+    Parameters:
+        workbook: The workbook object.
+        worksheet: The worksheet object.
+        combined_df: The combined DataFrame.
+    """
+    for idx, col in enumerate(combined_df.columns):
+        if col.endswith('_return'):
+            worksheet.set_column(idx, idx, None, workbook.add_format({'num_format': '0.00%'}))
+            # Apply conditional formatting with explicit min, mid, and max types
+            worksheet.conditional_format(1, idx, len(combined_df), idx, {
+                'type': '3_color_scale',
+                'min_type': 'num',
+                'min_value': combined_df[col].min(),
+                'mid_type': 'num',
+                'mid_value': 0,
+                'max_type': 'num',
+                'max_value': combined_df[col].max(),
+                'min_color': "#FF0000",  # Red for negative returns
+                'mid_color': "#FFFFFF",  # White for zero return
+                'max_color': "#00FF00",  # Green for positive returns
+            })
+
+def generate_report(df: pd.DataFrame, lookback_periods: list, increase_thresholds: list, decrease_thresholds: list) -> None:
+    """
+    Generate a report showing the increase and decrease for each threshold for all lookback periods.
+    
+    Parameters:
+        df (pd.DataFrame): DataFrame with returns for each ticker and time period.
+        lookback_periods (list): List of periods for which to calculate returns.
+        increase_thresholds (list): List of increase thresholds.
+        decrease_thresholds (list): List of decrease thresholds.
+    """
+    with pd.ExcelWriter('reports/stock_analysis_report.xlsx', engine='xlsxwriter') as writer:
+        for period in lookback_periods:
+            period_data = []
+
+            for i, threshold in enumerate(increase_thresholds):
+                if i < len(increase_thresholds) - 1:
+                    next_threshold = increase_thresholds[i + 1]
+                    increase_df = df[(df[f"{period}_return"] > threshold) & (df[f"{period}_return"] <= next_threshold)]
+                else:
+                    increase_df = df[df[f"{period}_return"] > threshold]
+                
+                if not increase_df.empty:
+                    increase_df = increase_df[['Ticker', f"{period}_return"]]
+                    increase_df['Threshold'] = f"{threshold * 100}% < Increase <= {next_threshold * 100}%" if i < len(increase_thresholds) - 1 else f"Increase > {threshold * 100}%"
+                    period_data.append(increase_df)
+
+            for i, threshold in enumerate(decrease_thresholds):
+                if i < len(decrease_thresholds) - 1:
+                    next_threshold = decrease_thresholds[i + 1]
+                    decrease_df = df[(df[f"{period}_return"] < -threshold) & (df[f"{period}_return"] >= -next_threshold)]
+                else:
+                    decrease_df = df[df[f"{period}_return"] < -threshold]
+                
+                if not decrease_df.empty:
+                    decrease_df = decrease_df[['Ticker', f"{period}_return"]]
+                    decrease_df['Threshold'] = f"{-next_threshold * 100}% <= Decrease < {-threshold * 100}%" if i < len(decrease_thresholds) - 1 else f"Decrease < {-threshold * 100}%"
+                    period_data.append(decrease_df)
+
+            if period_data:
+                combined_df = pd.concat(period_data)
+                combined_df = combined_df.sort_values(by=f"{period}_return", ascending=False)
+                combined_df.to_excel(writer, sheet_name=period, index=False)
+
+                # Format the worksheet
+                workbook = writer.book
+                worksheet = writer.sheets[period]
+                format_worksheet(workbook, worksheet, combined_df)
 
 def get_top_gainers():
     """
@@ -148,6 +222,11 @@ def get_top_gainers():
 
 if __name__ == "__main__":
     # Run the top gainers function
-    df_top_gainers = get_top_gainers()
-    df_top_gainers.to_csv("data/top_gainers.csv", index=False)
+    increase_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5]
+    decrease_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5]
+    # df_top_gainers = get_top_gainers()
+    # df_top_gainers.to_csv("data/top_gainers.csv", index=False)
+    df_top_gainers = pd.read_csv("data/top_gainers.csv")
     print(df_top_gainers.head())
+    
+    generate_report(df_top_gainers, ['5d','14d','21d','1mo','2mo','3mo','4mo','5mo','6mo','1y'], increase_thresholds, decrease_thresholds)

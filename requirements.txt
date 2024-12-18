@@ -6,3 +6,5 @@ plotly==5.17.0             # For creating visualizations
 numpy==1.26.0              # For numerical computations
 flask==2.2.1               # Required by Dash
 requests==2.31.0           # For handling HTTP requests (used by yfinance)
+openpyxl==3.1.2            # For writing Excel files
+xlsxwriter==3.0.9
