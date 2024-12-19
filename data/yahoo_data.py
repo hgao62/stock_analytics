@@ -120,7 +120,6 @@ def calculate_returns(df: pd.DataFrame, periods: list, period_days, ticker: str)
                         continue
             else:
                 returns[f"{period}_return"] = 0
-    logging.info(f"Completed return calculations for {ticker}.")
     return returns
 
 def screen_top_gainers(tickers: list, lookback_periods: list) -> pd.DataFrame:
@@ -364,7 +363,6 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str) -> pd.Data
             for period in lookback_periods:
                 returns[f"{period}_SP500_return"] = sp500_returns.get(f"{period}_return", 0)
             results.append(returns)
-            logging.info(f"Fetched and updated data for {ticker}.")
         except Exception as e:
             logging.error(f"Error fetching data for {ticker}: {e}")
             print(f"Error fetching data for {ticker}: {e}")
