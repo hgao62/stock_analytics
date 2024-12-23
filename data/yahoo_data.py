@@ -14,6 +14,10 @@ from typing import Optional
 
 #load environment variable
 load_dotenv()
+# Email configuration
+EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')  # Your email address
+EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')  # Your email password or app-specific password 
+
 # Ensure the 'logs' directory exists
 os.makedirs('logs', exist_ok=True)
 
@@ -26,6 +30,11 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'       # Date format
 )
 
+logging.info("Environment variables loaded.")
+logging.info(f"Email address: {EMAIL_ADDRESS}. Email password: {EMAIL_PASSWORD}")
+
+TODAY = datetime.now()
+REPORT_DATE = TODAY.strftime("%Y%m%d")
 def fetch_sp500_tickers() -> list:
     logging.info("Fetching S&P 500 tickers.")
     """
@@ -222,7 +231,7 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
         increase_thresholds (list): List of increase thresholds.
         decrease_thresholds (list): List of decrease thresholds.
     """
-    report_filename = f'reports/stock_analysis_report_{datetime.now().strftime("%Y%m%d")}.xlsx'
+    report_filename = f'reports/stock_analysis_report_{REPORT_DATE}.xlsx'
     with pd.ExcelWriter(report_filename, engine='xlsxwriter') as writer:
 
 
@@ -325,6 +334,13 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str) -> pd.Data
             sp500_df = pd.read_csv('data/SP500.csv', index_col=0, parse_dates=True)
             # Ensure the index is datetime with UTC
             sp500_df.index = pd.to_datetime(sp500_df.index, utc=True)
+            today_str = TODAY.strftime('%Y-%m-%d')
+            if today_str in sp500_df.index.strftime('%Y-%m-%d'):
+                # Update the row where the index equals TODAY
+                new_sp500_data = fetch_stock_data('^GSPC', '1d')
+                if not new_sp500_data.empty:
+                    sp500_df.loc[today_str] = new_sp500_data.loc[today_str]
+                    sp500_df.to_csv('data/SP500.csv')
         else:
             print("SP500.csv not found. Please run in 'initial' or 'daily' mode first.")
             return pd.DataFrame()
@@ -356,6 +372,13 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str) -> pd.Data
                     df = pd.read_csv(file_path, index_col=0, parse_dates=True)
                     # Ensure the index is datetime with UTC
                     df.index = pd.to_datetime(df.index, utc=True)
+                    today_str = TODAY.strftime('%Y-%m-%d')
+                    if today_str in df.index.strftime('%Y-%m-%d'):
+                        # Update the row where the index equals TODAY
+                        new_data = fetch_stock_data(ticker, '1d')
+                        if not new_data.empty:
+                            df.loc[today_str] = new_data.loc[today_str]
+                            df.to_csv(file_path)
                 else:
                     print(f"{file_path} not found. Please run in 'initial' or 'daily' mode first.")
                     continue
@@ -378,9 +401,7 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str) -> pd.Data
     logging.info("Completed getting top gainers.")
     return result_df
 
-# Email configuration
-EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')  # Your email address
-EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')  # Your email password or app-specific password 
+
 
 def send_email( recipient: str, subject: str, body: str,report_path: Optional[str]=None,) -> None:
     logging.info(f"Sending email to {recipient} with subject '{subject}'.")
@@ -440,13 +461,12 @@ def main():
         return
 
     generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds)
-
-    report_path = 'reports/stock_analysis_report.xlsx'
+    report_path = f'reports/stock_analysis_report_{REPORT_DATE}.xlsx'
     # Uncomment the following lines to enable email sending
     send_email(
         
         recipient=args.recipient,
-        subject='Stock Analysis Report',
+        subject=f'Stock Analysis Report {REPORT_DATE}',
         body='Please find the attached stock analysis report.',
         report_path=report_path,
     )
@@ -456,7 +476,9 @@ def main():
 # TODO 1. add sector to the report
 # TODO 2. add company name to the report
 if __name__ == "__main__":
+    
     alert_emails = os.getenv('ALERT_EMAILS').split(',')
+    # send_email(alert_emails, 'Stock Analysis Report - Started', 'The stock analysis script has started.')
     try:
         main()
     except Exception as e:
