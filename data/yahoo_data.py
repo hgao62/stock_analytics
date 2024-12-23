@@ -9,7 +9,11 @@ import argparse
 import pandas as pd
 from pandas import ExcelWriter
 import logging  # Import the logging module
+from dotenv import load_dotenv
+from typing import Optional
 
+#load environment variable
+load_dotenv()
 # Ensure the 'logs' directory exists
 os.makedirs('logs', exist_ok=True)
 
@@ -377,7 +381,8 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str) -> pd.Data
 # Email configuration
 EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')  # Your email address
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')  # Your email password or app-specific password 
-def send_email(report_path: str, recipient: str, subject: str, body: str) -> None:
+
+def send_email( recipient: str, subject: str, body: str,report_path: Optional[str]=None,) -> None:
     logging.info(f"Sending email to {recipient} with subject '{subject}'.")
     """
     Send an email with the report attached.
@@ -394,11 +399,12 @@ def send_email(report_path: str, recipient: str, subject: str, body: str) -> Non
     msg['To'] = recipient
     msg.set_content(body)
 
-    # Attach the report
-    with open(report_path, 'rb') as f:
-        file_data = f.read()
-        file_name = os.path.basename(report_path)
-    msg.add_attachment(file_data, maintype='application', subtype='octet-stream', filename=file_name)
+    if report_path:
+        # Attach the report
+        with open(report_path, 'rb') as f:
+            file_data = f.read()
+            file_name = os.path.basename(report_path)
+        msg.add_attachment(file_data, maintype='application', subtype='octet-stream', filename=file_name)
 
     # Send the email
     try:
@@ -422,31 +428,41 @@ def main():
     decrease_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5,1,2]
     lookback_periods = ['1d','5d','14d','21d','1mo','2mo','3mo','4mo','5mo','6mo','1y']
     
-    try:
-        sp500_tickers = fetch_sp500_tickers()
-        logging.info(f"Fetched {len(sp500_tickers)} S&P 500 tickers.")
-    
-        top_gainers = get_top_gainers(sp500_tickers, lookback_periods, mode=args.mode)
-        
-        if top_gainers.empty and args.mode == 'rerun':
-            logging.warning("No data available to generate the report in 'rerun' mode.")
-            print("No data available to generate the report in 'rerun' mode.")
-            return
-    
-        generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds)
-    
-        report_path = 'reports/stock_analysis_report.xlsx'
-        # Uncomment the following lines to enable email sending
-        # send_email(
-        #     report_path=report_path,
-        #     recipient=args.recipient,
-        #     subject='Stock Analysis Report',
-        #     body='Please find the attached stock analysis report.'
-        # )
-        logging.info("Script completed successfully.")
-    except Exception as e:
-        logging.critical(f"Unhandled exception: {e}")
-        raise
+  
+    sp500_tickers = fetch_sp500_tickers()
+    logging.info(f"Fetched {len(sp500_tickers)} S&P 500 tickers.")
 
+    top_gainers = get_top_gainers(sp500_tickers, lookback_periods, mode=args.mode)
+    
+    if top_gainers.empty and args.mode == 'rerun':
+        logging.warning("No data available to generate the report in 'rerun' mode.")
+        print("No data available to generate the report in 'rerun' mode.")
+        return
+
+    generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds)
+
+    report_path = 'reports/stock_analysis_report.xlsx'
+    # Uncomment the following lines to enable email sending
+    send_email(
+        
+        recipient=args.recipient,
+        subject='Stock Analysis Report',
+        body='Please find the attached stock analysis report.',
+        report_path=report_path,
+    )
+    logging.info("Script completed successfully.")
+
+
+# TODO 1. add sector to the report
+# TODO 2. add company name to the report
 if __name__ == "__main__":
-    main()
+    alert_emails = os.getenv('ALERT_EMAILS').split(',')
+    try:
+        main()
+    except Exception as e:
+        send_email(
+            recipient=alert_emails,
+            subject='Stock Analysis Report - Error',
+            body=f'An error occurred while running the stock analysis script. {str(e)}',
+        )
+        
