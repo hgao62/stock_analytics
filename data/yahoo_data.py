@@ -34,7 +34,7 @@ logging.info("Environment variables loaded.")
 logging.info(f"Email address: {EMAIL_ADDRESS}. Email password: {EMAIL_PASSWORD}")
 
 TODAY = datetime.now()
-REPORT_DATE = TODAY.strftime("%Y%m%d")
+REPORT_DATE = TODAY.strftime("%Y-%m-%d")
 def fetch_sp500_tickers() -> list:
     logging.info("Fetching S&P 500 tickers.")
     """
@@ -51,20 +51,25 @@ def fetch_sp500_tickers() -> list:
     return tickers
 
 
-def fetch_stock_data(ticker: str, period: str) -> pd.DataFrame:
+def fetch_stock_data(ticker: str, period: Optional[str] = None, start_date: Optional[pd.Timestamp] = None, end_date: Optional[pd.Timestamp] = None) -> pd.DataFrame:
     """
     Fetch historical stock data for a specific ticker from Yahoo Finance.
     
     Parameters:
         ticker (str): Stock ticker symbol.
-        period (str): Period string for Yahoo Finance API (e.g., '1mo', '3mo', '1y').
+        period (Optional[str]): Period string for Yahoo Finance API (e.g., '1mo', '3mo', '1y').
+        start_date (Optional[str]): Start date for fetching data.
+        end_date (Optional[str]): End date for fetching data.
     
     Returns:
         pd.DataFrame: DataFrame with historical stock data.
     """
     stock = yf.Ticker(ticker)
     try:
-        df = stock.history(period=period)
+        if start_date and end_date:
+            df = stock.history(start=start_date, end=end_date)
+        else:
+            df = stock.history(period=period)
     except Exception as e:
         logging.error(f"Error fetching data for {ticker}: {e}")
         raise
@@ -84,7 +89,7 @@ def get_neighbour_days(start_date)->list[datetime]:
         res.append(adjust_start_date_forwards)
     return res
 
-def calculate_returns(df: pd.DataFrame, periods: list, period_days, ticker: str) -> dict:
+def calculate_returns(df: pd.DataFrame, periods: list, period_days, ticker: str, report_date:pd.Timestamp) -> dict:
     """
     Calculate returns for specified periods.
     
@@ -98,9 +103,10 @@ def calculate_returns(df: pd.DataFrame, periods: list, period_days, ticker: str)
         dict: Dictionary of returns for each period.
     """
     returns = {"Ticker": ticker}
+    report_date_str = report_date.strftime('%Y-%m-%d')
     for period in periods:
         try:
-            start_date = df.index[-1] - timedelta(days=period_days[period])
+            start_date = report_date - timedelta(days=period_days[period])
         except Exception as e:
             logging.error(f"Error calculating start_date for {ticker} during {period}: {e}")
             print(f"Error calculating start_date for {ticker} during {period}: {e}")
@@ -108,13 +114,14 @@ def calculate_returns(df: pd.DataFrame, periods: list, period_days, ticker: str)
             continue  # Skip to the next period
         
         # Convert start_date to pandas Timestamp and normalize
-        start_date_normalized = pd.Timestamp(start_date).normalize()
+        start_date_normalized = pd.Timestamp(start_date).normalize().tz_localize('UTC')
         # Normalize dates to ignore timezone and other attributes
         df.index = df.index.normalize()
         
         if start_date_normalized in df.index:
             try:
-                returns[f"{period}_return"] = round((df['Close'].iloc[-1] / df.loc[start_date_normalized, 'Close'] - 1), 4)
+                report_date_str = report_date.strftime('%Y-%m-%d')
+                returns[f"{period}_return"] = round((df['Close'].loc[report_date_str] / df.loc[start_date_normalized, 'Close'] - 1), 4)
             except Exception as e:
                 logging.error(f"Error calculating return for {ticker} during {period}: {e}")
                 print(f"Error calculating return for {ticker} during {period}: {e}")
@@ -125,7 +132,7 @@ def calculate_returns(df: pd.DataFrame, periods: list, period_days, ticker: str)
             for day in neighbour_days:
                 if day in df.index:
                     try:
-                        returns[f"{period}_return"] = round((df['Close'].iloc[-1] / df.loc[day, 'Close'] - 1), 4)
+                        returns[f"{period}_return"] = round((df['Close'].loc[report_date_str] / df.loc[day, 'Close'] - 1), 4)
                         break
                     except Exception as e:
                         logging.error(f"Error calculating return for {ticker} on {day} during {period}: {e}")
@@ -220,7 +227,7 @@ def format_worksheet(workbook, worksheet, combined_df):
                 'max_color': "#00FF00",  # Green for positive returns
             })
 
-def generate_report(df: pd.DataFrame, lookback_periods: list, increase_thresholds: list, decrease_thresholds: list) -> None:
+def generate_report(df: pd.DataFrame, lookback_periods: list, increase_thresholds: list, decrease_thresholds: list,report_date_str:str) -> None:
     logging.info("Generating report.")
     """
     Generate a report showing the increase and decrease for each threshold for all lookback periods.
@@ -231,7 +238,7 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
         increase_thresholds (list): List of increase thresholds.
         decrease_thresholds (list): List of decrease thresholds.
     """
-    report_filename = f'reports/stock_analysis_report_{REPORT_DATE}.xlsx'
+    report_filename = f'reports/stock_analysis_report_{report_date_str}.xlsx'
     with pd.ExcelWriter(report_filename, engine='xlsxwriter') as writer:
 
 
@@ -277,7 +284,7 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
 
     logging.info(f"Report generated successfully: {report_filename}")
 
-def get_top_gainers(tickers: list, lookback_periods: list, mode: str) -> pd.DataFrame:
+def get_top_gainers(tickers: list, lookback_periods: list, mode: str, start_date: Optional[pd.Timestamp] = None, end_date: Optional[pd.Timestamp] = None) -> pd.DataFrame:
     logging.info(f"Running get_top_gainers in '{mode}' mode.")
     """
     Screen top gainers for a list of tickers over specified lookback periods,
@@ -287,6 +294,8 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str) -> pd.Data
         tickers (list): List of stock tickers.
         lookback_periods (list): List of periods for which to calculate returns.
         mode (str): 'initial', 'daily', or 'rerun'
+        start_date (Optional[str]): Start date for rerun mode.
+        end_date (Optional[str]): End date for rerun mode.
 
     Returns:
         pd.DataFrame: DataFrame with returns for each ticker and time period,
@@ -334,18 +343,22 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str) -> pd.Data
             sp500_df = pd.read_csv('data/SP500.csv', index_col=0, parse_dates=True)
             # Ensure the index is datetime with UTC
             sp500_df.index = pd.to_datetime(sp500_df.index, utc=True)
-            today_str = TODAY.strftime('%Y-%m-%d')
-            if today_str in sp500_df.index.strftime('%Y-%m-%d'):
-                # Update the row where the index equals TODAY
-                new_sp500_data = fetch_stock_data('^GSPC', '1d')
-                if not new_sp500_data.empty:
-                    sp500_df.loc[today_str] = new_sp500_data.loc[today_str]
-                    sp500_df.to_csv('data/SP500.csv')
+            # Fetch new data for the date range
+            new_sp500_data = fetch_stock_data('^GSPC', start_date=start_date, end_date=end_date)
+            if not new_sp500_data.empty:
+                # Append new data to the DataFrame
+                current_date_str = start_date.strftime('%Y-%m-%d')
+                if current_date_str in sp500_df.index.strftime('%Y-%m-%d'):
+                    sp500_df.loc[current_date_str] = new_sp500_data.loc[current_date_str]
+                else:
+                    sp500_df = pd.concat([sp500_df, new_sp500_data])
+            sp500_df = sp500_df.sort_index()
+            sp500_df.to_csv('data/SP500.csv')
         else:
             print("SP500.csv not found. Please run in 'initial' or 'daily' mode first.")
             return pd.DataFrame()
     
-    sp500_returns = calculate_returns(sp500_df, lookback_periods, period_days, 'S&P500')
+    sp500_returns = calculate_returns(sp500_df, lookback_periods, period_days, 'S&P500',start_date)
     
     for ticker in tickers:
         try:
@@ -372,19 +385,23 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str) -> pd.Data
                     df = pd.read_csv(file_path, index_col=0, parse_dates=True)
                     # Ensure the index is datetime with UTC
                     df.index = pd.to_datetime(df.index, utc=True)
-                    today_str = TODAY.strftime('%Y-%m-%d')
-                    if today_str in df.index.strftime('%Y-%m-%d'):
-                        # Update the row where the index equals TODAY
-                        new_data = fetch_stock_data(ticker, '1d')
-                        if not new_data.empty:
-                            df.loc[today_str] = new_data.loc[today_str]
-                            df.to_csv(file_path)
+                    # Fetch new data for the date range
+                    new_data = fetch_stock_data(ticker, start_date=start_date, end_date=end_date)
+                    if not new_data.empty:
+                        # Append new data to the DataFrame
+                        current_date_str = start_date.strftime('%Y-%m-%d')
+                        if current_date_str in df.index.strftime('%Y-%m-%d'):
+                            df.loc[current_date_str] = new_data.loc[current_date_str]
+                        else:
+                            df = pd.concat([df, new_data])
+                    df = df.sort_index()
+                    df.to_csv(file_path)
                 else:
                     print(f"{file_path} not found. Please run in 'initial' or 'daily' mode first.")
                     continue
 
             # Simplify by removing redundant if-else
-            returns = calculate_returns(df, lookback_periods, period_days, ticker)
+            returns = calculate_returns(df, lookback_periods, period_days, ticker,start_date)
             
             # Add S&P 500 returns to each ticker's returns
             for period in lookback_periods:
@@ -400,8 +417,6 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str) -> pd.Data
     result_df = result_df.sort_values(by=f"{lookback_periods[0]}_return", ascending=False)
     logging.info("Completed getting top gainers.")
     return result_df
-
-
 
 def send_email( recipient: str, subject: str, body: str,report_path: Optional[str]=None,) -> None:
     logging.info(f"Sending email to {recipient} with subject '{subject}'.")
@@ -441,35 +456,41 @@ def main():
     parser = argparse.ArgumentParser(description='Stock Analytics Script')
     parser.add_argument('--mode', choices=['initial', 'daily', 'rerun'], required=True, help='Mode to run the process: initial, daily, or rerun')
     parser.add_argument('--recipient', type=str, required=True, help='Recipient email address')
+    parser.add_argument('--start_date', type=str, help='Start date for rerun mode', default=TODAY.strftime('%Y-%m-%d'))
+    parser.add_argument('--end_date', type=str, help='End date for rerun mode', default=TODAY.strftime('%Y-%m-%d'))
+    
     args = parser.parse_args()
     
-    logging.info(f"Parameters received - Mode: {args.mode}, Recipient: {args.recipient}")
+    logging.info(f"Parameters received - Mode: {args.mode}, Recipient: {args.recipient}, Start Date: {args.start_date}, End Date: {args.end_date}")
     
-    increase_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5,1,2]
-    decrease_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5,1,2]
-    lookback_periods = ['1d','5d','14d','21d','1mo','2mo','3mo','4mo','5mo','6mo','1y']
+    increase_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
+    decrease_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
+    lookback_periods = ['1d', '5d', '14d', '21d', '1mo', '2mo', '3mo', '4mo', '5mo', '6mo', '1y']
     
-  
     sp500_tickers = fetch_sp500_tickers()
     logging.info(f"Fetched {len(sp500_tickers)} S&P 500 tickers.")
 
-    top_gainers = get_top_gainers(sp500_tickers, lookback_periods, mode=args.mode)
-    
-    if top_gainers.empty and args.mode == 'rerun':
-        logging.warning("No data available to generate the report in 'rerun' mode.")
-        print("No data available to generate the report in 'rerun' mode.")
-        return
-
-    generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds)
-    report_path = f'reports/stock_analysis_report_{REPORT_DATE}.xlsx'
-    # Uncomment the following lines to enable email sending
-    send_email(
+    date_range = pd.date_range(start=args.start_date, end=args.end_date)
+    for current_date in date_range:
         
-        recipient=args.recipient,
-        subject=f'Stock Analysis Report {REPORT_DATE}',
-        body='Please find the attached stock analysis report.',
-        report_path=report_path,
-    )
+        top_gainers = get_top_gainers(sp500_tickers, lookback_periods, mode=args.mode, start_date=current_date, end_date=current_date+timedelta(days=1))
+        
+        if top_gainers.empty and args.mode == 'rerun':
+            logging.warning(f"No data available to generate the report for {current_date_str} in 'rerun' mode.")
+            print(f"No data available to generate the report for {current_date_str} in 'rerun' mode.")
+            continue
+        current_date_str = current_date.strftime('%Y-%m-%d')
+        report_path = f'reports/stock_analysis_report_{current_date_str}.xlsx'
+        generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds,current_date_str)
+        
+        send_email(
+            recipient=args.recipient,
+            subject=f'Stock Analysis Report {current_date_str}',
+            body=f'Please find the attached stock analysis report for {current_date_str}.',
+            report_path=report_path,
+        )
+        logging.info(f"Report for {current_date_str} generated and emailed successfully.")
+
     logging.info("Script completed successfully.")
 
 
@@ -487,4 +508,4 @@ if __name__ == "__main__":
             subject='Stock Analysis Report - Error',
             body=f'An error occurred while running the stock analysis script. {str(e)}',
         )
-        
+
