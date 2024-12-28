@@ -136,7 +136,7 @@ def calculate_returns(df: pd.DataFrame, periods: list, period_days, ticker: str,
                         break
                     except Exception as e:
                         logging.error(f"Error calculating return for {ticker} on {day} during {period}: {e}")
-                        print(f"Error calculating return for {ticker} on {day} during {period}: {e}")
+                        returns[f"{period}_return"] = pd.NA
                         continue
             else:
                 returns[f"{period}_return"] = 0
@@ -359,7 +359,7 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str, start_date
             return pd.DataFrame()
     
     sp500_returns = calculate_returns(sp500_df, lookback_periods, period_days, 'S&P500',start_date)
-    
+  
     for ticker in tickers:
         try:
             if mode == 'initial':
@@ -463,8 +463,8 @@ def main():
     
     logging.info(f"Parameters received - Mode: {args.mode}, Recipient: {args.recipient}, Start Date: {args.start_date}, End Date: {args.end_date}")
     
-    increase_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
-    decrease_thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
+    increase_thresholds = [0.05,0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
+    decrease_thresholds = [0.05,0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
     lookback_periods = ['1d', '5d', '14d', '21d', '1mo', '2mo', '3mo', '4mo', '5mo', '6mo', '1y']
     
     sp500_tickers = fetch_sp500_tickers()
@@ -472,7 +472,6 @@ def main():
 
     date_range = pd.date_range(start=args.start_date, end=args.end_date)
     for current_date in date_range:
-        
         top_gainers = get_top_gainers(sp500_tickers, lookback_periods, mode=args.mode, start_date=current_date, end_date=current_date+timedelta(days=1))
         
         if top_gainers.empty and args.mode == 'rerun':
