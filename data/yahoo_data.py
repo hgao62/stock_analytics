@@ -11,7 +11,6 @@ from pandas import ExcelWriter
 import logging  # Import the logging module
 from dotenv import load_dotenv
 from typing import Optional
-
 #load environment variable
 load_dotenv()
 # Email configuration
@@ -227,6 +226,21 @@ def format_worksheet(workbook, worksheet, combined_df):
                 'max_color': "#00FF00",  # Green for positive returns
             })
 
+def enrich_with_sector_industry(df: pd.DataFrame, info_path: str) -> pd.DataFrame:
+    """
+    Enrich the DataFrame with sector and industry information.
+    
+    Parameters:
+        df (pd.DataFrame): DataFrame with stock data.
+        info_path (str): Path to the CSV file containing sector and industry information.
+    
+    Returns:
+        pd.DataFrame: Enriched DataFrame with sector and industry columns.
+    """
+    info_df = pd.read_csv(info_path)
+    enriched_df = df.merge(info_df, on='Ticker', how='left')
+    return enriched_df
+
 def generate_report(df: pd.DataFrame, lookback_periods: list, increase_thresholds: list, decrease_thresholds: list,report_date_str:str) -> None:
     logging.info("Generating report.")
     """
@@ -253,7 +267,7 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
                     increase_df = df[df[f"{period}_return"] > threshold]
                 
                 if not increase_df.empty:
-                    increase_df = increase_df[['Ticker', f"{period}_return",f"{period}_SP500_return"]]
+                    increase_df = increase_df[['Ticker', "sector", "industry",f"{period}_return",f"{period}_SP500_return"]]
                     increase_df['Threshold'] = f"{threshold * 100}% < Increase <= {next_threshold * 100}%" if i < len(increase_thresholds) - 1 else f"Increase > {threshold * 100}%"
                     period_data.append(increase_df)
 
@@ -265,7 +279,7 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
                     decrease_df = df[df[f"{period}_return"] < -threshold]
                 
                 if not decrease_df.empty:
-                    decrease_df = decrease_df[['Ticker', f"{period}_return",f"{period}_SP500_return"]]
+                    decrease_df = decrease_df[['Ticker', "sector", "industry", f"{period}_return",f"{period}_SP500_return"]]
                     decrease_df['Threshold'] = f"{-next_threshold * 100}% <= Decrease < {-threshold * 100}%" if i < len(decrease_thresholds) - 1 else f"Decrease < {-threshold * 100}%"
                     period_data.append(decrease_df)
 
@@ -283,6 +297,51 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
                     logging.error(f"Error formatting worksheet for period {period}: {e}")
 
     logging.info(f"Report generated successfully: {report_filename}")
+
+def fetch_sp500_data(mode: str, start_date: Optional[pd.Timestamp] = None, end_date: Optional[pd.Timestamp] = None) -> pd.DataFrame:
+    """
+    Fetch S&P 500 data based on the mode and date range.
+    
+    Parameters:
+        mode (str): 'initial', 'daily', or 'rerun'
+        start_date (Optional[pd.Timestamp]): Start date for rerun mode.
+        end_date (Optional[pd.Timestamp]): End date for rerun mode.
+    
+    Returns:
+        pd.DataFrame: DataFrame with S&P 500 data.
+    """
+    longest_period = '1y'  # Assuming '1y' is the longest period for S&P 500 data
+    if mode == 'initial':
+        sp500_df = fetch_stock_data('^GSPC', longest_period)
+        sp500_df.to_csv('data/SP500.csv')
+    elif mode == 'daily':
+        if os.path.exists('data/SP500.csv'):
+            sp500_df = pd.read_csv('data/SP500.csv', index_col=0, parse_dates=True)
+            sp500_df.index = pd.to_datetime(sp500_df.index, utc=True)
+            new_sp500_data = fetch_stock_data('^GSPC', '1d')
+            if not new_sp500_data.empty:
+                sp500_df = pd.concat([sp500_df, new_sp500_data])
+                sp500_df.to_csv('data/SP500.csv')
+        else:
+            sp500_df = fetch_stock_data('^GSPC', longest_period)
+            sp500_df.to_csv('data/SP500.csv')
+    elif mode == 'rerun':
+        if os.path.exists('data/SP500.csv'):
+            sp500_df = pd.read_csv('data/SP500.csv', index_col=0, parse_dates=True)
+            sp500_df.index = pd.to_datetime(sp500_df.index, utc=True)
+            new_sp500_data = fetch_stock_data('^GSPC', start_date=start_date, end_date=end_date)
+            if not new_sp500_data.empty:
+                current_date_str = start_date.strftime('%Y-%m-%d')
+                if current_date_str in sp500_df.index.strftime('%Y-%m-%d'):
+                    sp500_df.loc[current_date_str] = new_sp500_data.loc[current_date_str]
+                else:
+                    sp500_df = pd.concat([sp500_df, new_sp500_data])
+            sp500_df = sp500_df.sort_index()
+            sp500_df.to_csv('data/SP500.csv')
+        else:
+            print("SP500.csv not found. Please run in 'initial' or 'daily' mode first.")
+            return pd.DataFrame()
+    return sp500_df
 
 def get_top_gainers(tickers: list, lookback_periods: list, mode: str, start_date: Optional[pd.Timestamp] = None, end_date: Optional[pd.Timestamp] = None) -> pd.DataFrame:
     logging.info(f"Running get_top_gainers in '{mode}' mode.")
@@ -322,43 +381,10 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str, start_date
     longest_period = max(lookback_periods, key=lambda x: period_days[x])
 
     # Fetch S&P 500 returns
-    if mode == 'initial':
-        sp500_df = fetch_stock_data('^GSPC', longest_period)
-        sp500_df.to_csv('data/SP500.csv')
-    elif mode == 'daily':
-        if os.path.exists('data/SP500.csv'):
-            sp500_df = pd.read_csv('data/SP500.csv', index_col=0, parse_dates=True)
-            # Ensure the index is datetime with UTC
-            sp500_df.index = pd.to_datetime(sp500_df.index, utc=True)
-            new_sp500_data = fetch_stock_data('^GSPC', '1d')
-            if not new_sp500_data.empty:
-                sp500_df = pd.concat([sp500_df, new_sp500_data])
-                sp500_df.to_csv('data/SP500.csv')
-        else:
-            # If SP500.csv does not exist, perform initial load
-            sp500_df = fetch_stock_data('^GSPC', longest_period)
-            sp500_df.to_csv('data/SP500.csv')
-    elif mode == 'rerun':
-        if os.path.exists('data/SP500.csv'):
-            sp500_df = pd.read_csv('data/SP500.csv', index_col=0, parse_dates=True)
-            # Ensure the index is datetime with UTC
-            sp500_df.index = pd.to_datetime(sp500_df.index, utc=True)
-            # Fetch new data for the date range
-            new_sp500_data = fetch_stock_data('^GSPC', start_date=start_date, end_date=end_date)
-            if not new_sp500_data.empty:
-                # Append new data to the DataFrame
-                current_date_str = start_date.strftime('%Y-%m-%d')
-                if current_date_str in sp500_df.index.strftime('%Y-%m-%d'):
-                    sp500_df.loc[current_date_str] = new_sp500_data.loc[current_date_str]
-                else:
-                    sp500_df = pd.concat([sp500_df, new_sp500_data])
-            sp500_df = sp500_df.sort_index()
-            sp500_df.to_csv('data/SP500.csv')
-        else:
-            print("SP500.csv not found. Please run in 'initial' or 'daily' mode first.")
-            return pd.DataFrame()
+    sp500_df = fetch_sp500_data(mode, start_date, end_date)
+
     
-    sp500_returns = calculate_returns(sp500_df, lookback_periods, period_days, 'S&P500',start_date)
+    sp500_returns = calculate_returns(sp500_df, lookback_periods, period_days, 'S&P500', start_date)
   
     for ticker in tickers:
         try:
@@ -401,7 +427,7 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str, start_date
                     continue
 
             # Simplify by removing redundant if-else
-            returns = calculate_returns(df, lookback_periods, period_days, ticker,start_date)
+            returns = calculate_returns(df, lookback_periods, period_days, ticker, start_date)
             
             # Add S&P 500 returns to each ticker's returns
             for period in lookback_periods:
@@ -451,6 +477,7 @@ def send_email( recipient: str, subject: str, body: str,report_path: Optional[st
     except Exception as e:
         logging.error(f"Error sending email: {e}")
 
+
 def main():
     logging.info("Script started.")
     parser = argparse.ArgumentParser(description='Stock Analytics Script')
@@ -479,6 +506,10 @@ def main():
             print(f"No data available to generate the report for {current_date_str} in 'rerun' mode.")
             continue
         current_date_str = current_date.strftime('%Y-%m-%d')
+        
+        # Enrich top_gainers with sector and industry information
+        top_gainers = enrich_with_sector_industry(top_gainers, 'data/sp500_stocks_sector_industry_info.csv')
+        
         report_path = f'reports/stock_analysis_report_{current_date_str}.xlsx'
         generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds,current_date_str)
         
@@ -498,7 +529,6 @@ def main():
 if __name__ == "__main__":
     
     alert_emails = os.getenv('ALERT_EMAILS').split(',')
-    # send_email(alert_emails, 'Stock Analysis Report - Started', 'The stock analysis script has started.')
     try:
         main()
     except Exception as e:
@@ -507,4 +537,5 @@ if __name__ == "__main__":
             subject='Stock Analysis Report - Error',
             body=f'An error occurred while running the stock analysis script. {str(e)}',
         )
+
 

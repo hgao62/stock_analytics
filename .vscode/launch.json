@@ -14,7 +14,11 @@
                 "--mode",
                 "rerun",
                 "--recipient",
-                "your_email@example.com"
+                "hgao62@uwo.ca",
+                // "--start_date",
+                // "2024-12-27",
+                // "--end_date",
+                // "2024-12-27",
             ],
         }
     ]
