@@ -10,7 +10,7 @@ import pandas as pd
 from pandas import ExcelWriter
 import logging  # Import the logging module
 from dotenv import load_dotenv
-from typing import Optional
+from typing import Optional, List
 #load environment variable
 load_dotenv()
 # Email configuration
@@ -241,7 +241,7 @@ def enrich_with_sector_industry(df: pd.DataFrame, info_path: str) -> pd.DataFram
     enriched_df = df.merge(info_df, on='Ticker', how='left')
     return enriched_df
 
-def generate_report(df: pd.DataFrame, lookback_periods: list, increase_thresholds: list, decrease_thresholds: list,report_date_str:str) -> None:
+def generate_report(df: pd.DataFrame, lookback_periods: list, increase_thresholds: list, decrease_thresholds: list,report_date_str:str, columns:List[str]) -> None:
     logging.info("Generating report.")
     """
     Generate a report showing the increase and decrease for each threshold for all lookback periods.
@@ -253,10 +253,12 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
         decrease_thresholds (list): List of decrease thresholds.
     """
     report_filename = f'reports/stock_analysis_report_{report_date_str}.xlsx'
+    
     with pd.ExcelWriter(report_filename, engine='xlsxwriter') as writer:
 
 
         for period in lookback_periods:
+            final_output_columns = columns+[f"{period}_return",f"{period}_SP500_return"]
             period_data = []
 
             for i, threshold in enumerate(increase_thresholds):
@@ -267,7 +269,7 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
                     increase_df = df[df[f"{period}_return"] > threshold]
                 
                 if not increase_df.empty:
-                    increase_df = increase_df[['Ticker', "sector", "industry",f"{period}_return",f"{period}_SP500_return"]]
+                    increase_df = increase_df[final_output_columns]
                     increase_df['Threshold'] = f"{threshold * 100}% < Increase <= {next_threshold * 100}%" if i < len(increase_thresholds) - 1 else f"Increase > {threshold * 100}%"
                     period_data.append(increase_df)
 
@@ -279,7 +281,7 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
                     decrease_df = df[df[f"{period}_return"] < -threshold]
                 
                 if not decrease_df.empty:
-                    decrease_df = decrease_df[['Ticker', "sector", "industry", f"{period}_return",f"{period}_SP500_return"]]
+                    decrease_df = decrease_df[final_output_columns]
                     decrease_df['Threshold'] = f"{-next_threshold * 100}% <= Decrease < {-threshold * 100}%" if i < len(decrease_thresholds) - 1 else f"Decrease < {-threshold * 100}%"
                     period_data.append(decrease_df)
 
@@ -511,7 +513,8 @@ def main():
         top_gainers = enrich_with_sector_industry(top_gainers, 'data/sp500_stocks_sector_industry_info.csv')
         
         report_path = f'reports/stock_analysis_report_{current_date_str}.xlsx'
-        generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds,current_date_str)
+        column_output = ["Ticker", "company_name","sector", "industry",]
+        generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds,current_date_str,column_output)
         
         send_email(
             recipient=args.recipient,

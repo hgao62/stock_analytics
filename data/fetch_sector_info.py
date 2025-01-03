@@ -15,6 +15,11 @@ for ticker in sp500_tickers:
         record['industry'] = res.info['industry']
     except:
         record['industry'] = 'N/A'
+        
+    try:
+        record['company_name'] = res.info['longName']
+    except:
+        record['company_name'] = 'N/A'
     output.append(record)
 df = pd.DataFrame(output)
 df.to_csv('data/sp500_stocks_sector_industry_info.csv')
