@@ -6,7 +6,7 @@ output = []
 for ticker in sp500_tickers:
     record = {}
     res = yf.Ticker(ticker)
-    record['ticker'] = ticker
+    record['Ticker'] = ticker
     try:
         record['sector'] = res.info['sector']
     except:
@@ -21,5 +21,5 @@ for ticker in sp500_tickers:
     except:
         record['company_name'] = 'N/A'
     output.append(record)
-df = pd.DataFrame(output)
+df = pd.DataFrame(output,index=False)
 df.to_csv('data/sp500_stocks_sector_industry_info.csv')
