@@ -11,6 +11,11 @@ from pandas import ExcelWriter
 import logging  # Import the logging module
 from dotenv import load_dotenv
 from typing import Optional, List
+from sqlitedb.read import read_data_from_sqlite
+from sqlitedb.write import write_data_to_sqlite
+from sqlitedb.models import SP500Holdings,SP500StocksPrice,IndexPrice
+from sqlitedb.delete import truncate_table
+from sqlitedb.update import update_data_in_sqlite
 #load environment variable
 load_dotenv()
 # Email configuration
@@ -34,19 +39,20 @@ logging.info(f"Email address: {EMAIL_ADDRESS}. Email password: {EMAIL_PASSWORD}"
 
 TODAY = datetime.now()
 REPORT_DATE = TODAY.strftime("%Y-%m-%d")
+
 def fetch_sp500_tickers() -> list:
     logging.info("Fetching S&P 500 tickers.")
     """
-    Fetch the list of S&P 500 tickers by scraping Wikipedia.
-    Returns:
+    Fetch the list of S&P 500 tickers from sqlite
         list: List of ticker symbols.
     """
-    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+
     try:
-        table = pd.read_csv("sp500_holdings.csv")
+        table = read_data_from_sqlite(SP500Holdings)
     except Exception as e:
-        table = pd.read_html(url, match="Symbol")[0]  # Automatically parses HTML tables
-    tickers = table["Symbol"].tolist()
+        logging.error(f"Error fetching data from sqlite: {e}")
+        raise e
+    tickers = table["Ticker"].tolist()
     return tickers
 
 
@@ -102,10 +108,10 @@ def calculate_returns(df: pd.DataFrame, periods: list, period_days, ticker: str,
         dict: Dictionary of returns for each period.
     """
     returns = {"Ticker": ticker}
-    report_date_str = report_date.strftime('%Y-%m-%d')
+  
     for period in periods:
         try:
-            start_date = report_date - timedelta(days=period_days[period])
+            start_date = (report_date - timedelta(days=period_days[period])).date()
         except Exception as e:
             logging.error(f"Error calculating start_date for {ticker} during {period}: {e}")
             print(f"Error calculating start_date for {ticker} during {period}: {e}")
@@ -113,28 +119,30 @@ def calculate_returns(df: pd.DataFrame, periods: list, period_days, ticker: str,
             continue  # Skip to the next period
         
         # Convert start_date to pandas Timestamp and normalize
-        start_date_normalized = pd.Timestamp(start_date).normalize().tz_localize('UTC')
+        # start_date_normalized = pd.Timestamp(start_date).normalize().tz_localize('UTC')
         # Normalize dates to ignore timezone and other attributes
-        df.index = df.index.normalize()
-        
-        if start_date_normalized in df.index:
+    
+        report_date_price = df[df['Date']==report_date.date()]['Close'].values[0]
+        if start_date in df['Date'].values:
             try:
-                report_date_str = report_date.strftime('%Y-%m-%d')
-                returns[f"{period}_return"] = round((df['Close'].loc[report_date_str] / df.loc[start_date_normalized, 'Close'] - 1), 4)
+          
+                lookback_date_price = df[df['Date']==start_date]['Close'].values[0]
+                returns[f"{period}_return"] = round((report_date_price /lookback_date_price -1 ), 4)
             except Exception as e:
                 logging.error(f"Error calculating return for {ticker} during {period}: {e}")
                 print(f"Error calculating return for {ticker} during {period}: {e}")
                 returns[f"{period}_return"] = 0
         else:
             # If start date is not in the data, calculate the return using the closest available date
-            neighbour_days = get_neighbour_days(start_date_normalized)
-            for day in neighbour_days:
-                if day in df.index:
+            neighbour_days = get_neighbour_days(start_date)
+            for adj_lookback_date in neighbour_days:
+                if adj_lookback_date in df['Date'].values:
                     try:
-                        returns[f"{period}_return"] = round((df['Close'].loc[report_date_str] / df.loc[day, 'Close'] - 1), 4)
+                        lookback_date_price = df[df['Date']==adj_lookback_date]['Close'].values[0]
+                        returns[f"{period}_return"] = round((report_date_price  / lookback_date_price - 1), 4)
                         break
                     except Exception as e:
-                        logging.error(f"Error calculating return for {ticker} on {day} during {period}: {e}")
+                        logging.error(f"Error calculating return for {ticker} on {adj_lookback_date} during {period}: {e}")
                         returns[f"{period}_return"] = pd.NA
                         continue
             else:
@@ -226,7 +234,7 @@ def format_worksheet(workbook, worksheet, combined_df):
                 'max_color': "#00FF00",  # Green for positive returns
             })
 
-def enrich_with_sector_industry(df: pd.DataFrame, info_path: str) -> pd.DataFrame:
+def enrich_with_sector_industry(df: pd.DataFrame) -> pd.DataFrame:
     """
     Enrich the DataFrame with sector and industry information.
     
@@ -237,7 +245,7 @@ def enrich_with_sector_industry(df: pd.DataFrame, info_path: str) -> pd.DataFram
     Returns:
         pd.DataFrame: Enriched DataFrame with sector and industry columns.
     """
-    info_df = pd.read_csv(info_path)
+    info_df = read_data_from_sqlite(SP500Holdings)
     enriched_df = df.merge(info_df, on='Ticker', how='left')
     return enriched_df
 
@@ -300,6 +308,44 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
 
     logging.info(f"Report generated successfully: {report_filename}")
 
+
+def ticker_data_processing(mode: str, ticker:str, model, start_date: Optional[pd.Timestamp] = None, end_date: Optional[pd.Timestamp] = None, longest_period:Optional[str]=None) -> pd.DataFrame:
+    """
+    Fetch S&P 500 data based on the mode and date range.
+    
+    Parameters:
+        mode (str): 'initial', 'daily', or 'rerun'
+        start_date (Optional[pd.Timestamp]): Start date for rerun mode.
+        end_date (Optional[pd.Timestamp]): End date for rerun mode.
+    
+    Returns:
+        pd.DataFrame: DataFrame with S&P 500 data.
+    """
+   
+    if mode == 'initial':
+        ticker_df = fetch_stock_data(ticker, longest_period)
+        write_data_to_sqlite(model,ticker_df,clear_existing_data=True)
+        
+    elif mode == 'daily':
+        new_ticker_df = fetch_stock_data(ticker, '1d')
+        new_ticker_df = new_ticker_df.reset_index()
+        new_ticker_df['Date'] = pd.to_datetime(new_ticker_df['Date']).dt.date
+        if not new_ticker_df.empty:
+            write_data_to_sqlite(model,new_ticker_df)
+        ticker_df = read_data_from_sqlite(model, filters={"Ticker":ticker}) 
+        ticker_df = ticker_df.sort_values(by='Date')
+        # sp500_df.index = pd.to_datetime(sp500_df.index)
+    elif mode == 'rerun':
+        new_ticker_df = fetch_stock_data(ticker, start_date=start_date, end_date=end_date)
+        new_ticker_df = new_ticker_df.reset_index()
+        new_ticker_df['Date'] = pd.to_datetime(new_ticker_df['Date']).dt.date
+        new_records = new_ticker_df.to_dict(orient='records')[0]
+        records_to_update = {k: v for k, v in new_records.items() if k in ['Close']}
+        update_data_in_sqlite(model,records_to_update,filters={"Ticker":ticker,"Date":start_date},)
+        ticker_df = read_data_from_sqlite(model,filters={"Ticker":ticker})
+        ticker_df = ticker_df.sort_values(by='Date')
+    return ticker_df
+
 def fetch_sp500_data(mode: str, start_date: Optional[pd.Timestamp] = None, end_date: Optional[pd.Timestamp] = None) -> pd.DataFrame:
     """
     Fetch S&P 500 data based on the mode and date range.
@@ -315,34 +361,18 @@ def fetch_sp500_data(mode: str, start_date: Optional[pd.Timestamp] = None, end_d
     longest_period = '1y'  # Assuming '1y' is the longest period for S&P 500 data
     if mode == 'initial':
         sp500_df = fetch_stock_data('^GSPC', longest_period)
-        sp500_df.to_csv('data/SP500.csv')
+        write_data_to_sqlite(SP500Holdings,sp500_df,clear_existing_data=True)
+        
     elif mode == 'daily':
-        if os.path.exists('data/SP500.csv'):
-            sp500_df = pd.read_csv('data/SP500.csv', index_col=0, parse_dates=True)
-            sp500_df.index = pd.to_datetime(sp500_df.index, utc=True)
-            new_sp500_data = fetch_stock_data('^GSPC', '1d')
-            if not new_sp500_data.empty:
-                sp500_df = pd.concat([sp500_df, new_sp500_data])
-                sp500_df.to_csv('data/SP500.csv')
-        else:
-            sp500_df = fetch_stock_data('^GSPC', longest_period)
-            sp500_df.to_csv('data/SP500.csv')
+        new_sp500_data = fetch_stock_data('^GSPC', '1d')
+        if not new_sp500_data.empty:
+            write_data_to_sqlite(SP500Holdings,new_sp500_data)
+        sp500_df = read_data_from_sqlite(SP500Holdings)
+        # sp500_df.index = pd.to_datetime(sp500_df.index)
     elif mode == 'rerun':
-        if os.path.exists('data/SP500.csv'):
-            sp500_df = pd.read_csv('data/SP500.csv', index_col=0, parse_dates=True)
-            sp500_df.index = pd.to_datetime(sp500_df.index, utc=True)
-            new_sp500_data = fetch_stock_data('^GSPC', start_date=start_date, end_date=end_date)
-            if not new_sp500_data.empty:
-                current_date_str = start_date.strftime('%Y-%m-%d')
-                if current_date_str in sp500_df.index.strftime('%Y-%m-%d'):
-                    sp500_df.loc[current_date_str] = new_sp500_data.loc[current_date_str]
-                else:
-                    sp500_df = pd.concat([sp500_df, new_sp500_data])
-            sp500_df = sp500_df.sort_index()
-            sp500_df.to_csv('data/SP500.csv')
-        else:
-            print("SP500.csv not found. Please run in 'initial' or 'daily' mode first.")
-            return pd.DataFrame()
+        new_sp500_data = fetch_stock_data('^GSPC', start_date=start_date, end_date=end_date)
+        update_data_in_sqlite(SP500Holdings,new_sp500_data.to_dict(orient='records'),date_range={start_date,end_date})
+     
     return sp500_df
 
 def get_top_gainers(tickers: list, lookback_periods: list, mode: str, start_date: Optional[pd.Timestamp] = None, end_date: Optional[pd.Timestamp] = None) -> pd.DataFrame:
@@ -383,55 +413,15 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str, start_date
     longest_period = max(lookback_periods, key=lambda x: period_days[x])
 
     # Fetch S&P 500 returns
-    sp500_df = fetch_sp500_data(mode, start_date, end_date)
-
-    
+    sp500_df = ticker_data_processing(mode, '^GSPC', IndexPrice, start_date, end_date,longest_period)
     sp500_returns = calculate_returns(sp500_df, lookback_periods, period_days, 'S&P500', start_date)
-  
+    # sp500_underlying_returns = read_data_from_sqlite(SP500StocksPrice)
+    count = 0
     for ticker in tickers:
-        try:
-            if mode == 'initial':
-                df = fetch_stock_data(ticker, longest_period)
-                df.to_csv(f"data/{ticker}.csv")
-            elif mode == 'daily':
-                file_path = f"data/{ticker}.csv"
-                if os.path.exists(file_path):
-                    df = pd.read_csv(file_path, index_col=0, parse_dates=True)
-                    # Ensure the index is datetime with UTC
-                    df.index = pd.to_datetime(df.index, utc=True)
-                    new_data = fetch_stock_data(ticker, '1d')
-                    if not new_data.empty:
-                        df = pd.concat([df, new_data])
-                        df.to_csv(file_path)
-                else:
-                    # If ticker CSV does not exist, perform initial load
-                    df = fetch_stock_data(ticker, longest_period)
-                    df.to_csv(f"data/{ticker}.csv")
-            elif mode == 'rerun':
-                file_path = f"data/{ticker}.csv"
-                if os.path.exists(file_path):
-                    df = pd.read_csv(file_path, index_col=0, parse_dates=True)
-                    # Ensure the index is datetime with UTC
-                    df.index = pd.to_datetime(df.index, utc=True)
-                    # Fetch new data for the date range
-                    new_data = fetch_stock_data(ticker, start_date=start_date, end_date=end_date)
-                    if not new_data.empty:
-                        # Append new data to the DataFrame
-                        current_date_str = start_date.strftime('%Y-%m-%d')
-                        if current_date_str in df.index.strftime('%Y-%m-%d'):
-                            df.loc[current_date_str] = new_data.loc[current_date_str]
-                        else:
-                            df = pd.concat([df, new_data])
-                    df = df.sort_index()
-                    df.to_csv(file_path)
-                else:
-                    print(f"{file_path} not found. Please run in 'initial' or 'daily' mode first.")
-                    continue
-
-            # Simplify by removing redundant if-else
-            returns = calculate_returns(df, lookback_periods, period_days, ticker, start_date)
-            
-            # Add S&P 500 returns to each ticker's returns
+        count +=1
+        try:    
+            ticker_df = ticker_data_processing(mode, ticker, SP500StocksPrice, start_date, end_date,longest_period)
+            returns = calculate_returns(ticker_df, lookback_periods, period_days, ticker, start_date)
             for period in lookback_periods:
                 returns[f"{period}_SP500_return"] = sp500_returns.get(f"{period}_return", 0)
             results.append(returns)
@@ -439,7 +429,7 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str, start_date
             logging.error(f"Error fetching data for {ticker}: {e}")
             print(f"Error fetching data for {ticker}: {e}")
             continue
-
+        print(f"Processed {count} tickers.")
     # Convert results to a DataFrame
     result_df = pd.DataFrame(results)
     result_df = result_df.sort_values(by=f"{lookback_periods[0]}_return", ascending=False)
@@ -510,10 +500,10 @@ def main():
         current_date_str = current_date.strftime('%Y-%m-%d')
         
         # Enrich top_gainers with sector and industry information
-        top_gainers = enrich_with_sector_industry(top_gainers, 'data/sp500_stocks_sector_industry_info.csv')
+        top_gainers = enrich_with_sector_industry(top_gainers)
         
         report_path = f'reports/stock_analysis_report_{current_date_str}.xlsx'
-        column_output = ["Ticker", "company_name","sector", "industry",]
+        column_output = ["Ticker", "CompanyName","Sector", "Industry",]
         generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds,current_date_str,column_output)
         
         send_email(

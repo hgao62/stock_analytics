@@ -10,3 +10,5 @@ openpyxl==3.1.2            # For writing Excel files
 xlsxwriter==3.0.9
 python-dotenv===0.20.0
 beautifulsoup4==4.12.3
+firebase-admin==6.6.0
+alembic==1.7.4

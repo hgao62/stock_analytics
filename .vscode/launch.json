@@ -15,10 +15,10 @@
                 "rerun",
                 "--recipient",
                 "hgao62@uwo.ca",
-                // "--start_date",
-                // "2024-12-27",
-                // "--end_date",
-                // "2024-12-27",
+                "--start_date",
+                "2025-01-03",
+                "--end_date",
+                "2025-01-03",
             ],
         }
     ]

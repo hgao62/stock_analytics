@@ -1,0 +1,12 @@
+{
+  "emulators": {
+    "firestore": {
+      "port": 8080,
+       "persistence": "./emulator-data"
+    },
+    "ui": {
+      "enabled": true
+    },
+    "singleProjectMode": true
+  }
+}
