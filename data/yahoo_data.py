@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from typing import Optional, List
 from sqlitedb.read import read_data_from_sqlite
 from sqlitedb.write import write_data_to_sqlite
-from sqlitedb.models import SP500Holdings,SP500StocksPrice,IndexPrice
+from sqlitedb.models import SP500Holdings,SP500StocksPrice,IndexPrice,WatchListTickers,NASDAQHoldings
 from sqlitedb.delete import truncate_table
 from sqlitedb.update import update_data_in_sqlite
 #load environment variable
@@ -40,15 +40,15 @@ logging.info(f"Email address: {EMAIL_ADDRESS}. Email password: {EMAIL_PASSWORD}"
 TODAY = datetime.now()
 REPORT_DATE = TODAY.strftime("%Y-%m-%d")
 
-def fetch_sp500_tickers() -> list:
-    logging.info("Fetching S&P 500 tickers.")
+def fetch_index_underlying(model) -> list:
+    logging.info(f"Fetching underlying tickers for {model}.")
     """
-    Fetch the list of S&P 500 tickers from sqlite
+    Fetch the list of index underlying tickers from sqlite
         list: List of ticker symbols.
     """
 
     try:
-        table = read_data_from_sqlite(SP500Holdings)
+        table = read_data_from_sqlite(model)
     except Exception as e:
         logging.error(f"Error fetching data from sqlite: {e}")
         raise e
@@ -78,7 +78,10 @@ def fetch_stock_data(ticker: str, period: Optional[str] = None, start_date: Opti
     except Exception as e:
         logging.error(f"Error fetching data for {ticker}: {e}")
         raise
-    df.index = pd.to_datetime(df.index, utc=True)  # Set utc=True
+    # df.index = pd.to_datetime(df.index, utc=True)  # Set utc=True
+    df = df.reset_index()
+    df['Date'] = pd.to_datetime(df['Date']).dt.date
+    df['Ticker'] = ticker
     return df
 
 def get_neighbour_days(start_date)->list[datetime]:
@@ -249,7 +252,7 @@ def enrich_with_sector_industry(df: pd.DataFrame) -> pd.DataFrame:
     enriched_df = df.merge(info_df, on='Ticker', how='left')
     return enriched_df
 
-def generate_report(df: pd.DataFrame, lookback_periods: list, increase_thresholds: list, decrease_thresholds: list,report_date_str:str, columns:List[str]) -> None:
+def generate_report(df: pd.DataFrame, lookback_periods: list, increase_thresholds: list, decrease_thresholds: list,report_date_str:str, columns:List[str],report_name:str) -> None:
     logging.info("Generating report.")
     """
     Generate a report showing the increase and decrease for each threshold for all lookback periods.
@@ -260,7 +263,7 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
         increase_thresholds (list): List of increase thresholds.
         decrease_thresholds (list): List of decrease thresholds.
     """
-    report_filename = f'reports/stock_analysis_report_{report_date_str}.xlsx'
+    report_filename = f'reports/{report_name}_{report_date_str}.xlsx'
     
     with pd.ExcelWriter(report_filename, engine='xlsxwriter') as writer:
 
@@ -308,6 +311,7 @@ def generate_report(df: pd.DataFrame, lookback_periods: list, increase_threshold
 
     logging.info(f"Report generated successfully: {report_filename}")
 
+enrich_mapping = {"^GSPC":"S&P 500","^IXIC":"NASDAQ"}
 
 def ticker_data_processing(mode: str, ticker:str, model, start_date: Optional[pd.Timestamp] = None, end_date: Optional[pd.Timestamp] = None, longest_period:Optional[str]=None) -> pd.DataFrame:
     """
@@ -324,12 +328,13 @@ def ticker_data_processing(mode: str, ticker:str, model, start_date: Optional[pd
    
     if mode == 'initial':
         ticker_df = fetch_stock_data(ticker, longest_period)
-        write_data_to_sqlite(model,ticker_df,clear_existing_data=True)
-        
+        if ticker in enrich_mapping and model == IndexPrice:
+            ticker_df['Name'] = enrich_mapping[ticker]
+        write_data_to_sqlite(model,ticker_df)
     elif mode == 'daily':
         new_ticker_df = fetch_stock_data(ticker, '1d')
-        new_ticker_df = new_ticker_df.reset_index()
-        new_ticker_df['Date'] = pd.to_datetime(new_ticker_df['Date']).dt.date
+        if ticker in enrich_mapping and model == IndexPrice:
+            new_ticker_df['Name'] = enrich_mapping[ticker]
         if not new_ticker_df.empty:
             write_data_to_sqlite(model,new_ticker_df)
         ticker_df = read_data_from_sqlite(model, filters={"Ticker":ticker}) 
@@ -337,8 +342,8 @@ def ticker_data_processing(mode: str, ticker:str, model, start_date: Optional[pd
         # sp500_df.index = pd.to_datetime(sp500_df.index)
     elif mode == 'rerun':
         new_ticker_df = fetch_stock_data(ticker, start_date=start_date, end_date=end_date)
-        new_ticker_df = new_ticker_df.reset_index()
-        new_ticker_df['Date'] = pd.to_datetime(new_ticker_df['Date']).dt.date
+        if ticker in enrich_mapping and model == IndexPrice:
+            new_ticker_df['Name'] = enrich_mapping[ticker]
         new_records = new_ticker_df.to_dict(orient='records')[0]
         records_to_update = {k: v for k, v in new_records.items() if k in ['Close']}
         update_data_in_sqlite(model,records_to_update,filters={"Ticker":ticker,"Date":start_date},)
@@ -415,6 +420,8 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str, start_date
     # Fetch S&P 500 returns
     sp500_df = ticker_data_processing(mode, '^GSPC', IndexPrice, start_date, end_date,longest_period)
     sp500_returns = calculate_returns(sp500_df, lookback_periods, period_days, 'S&P500', start_date)
+    nasdaq_df = ticker_data_processing(mode, '^IXIC', IndexPrice, start_date, end_date,longest_period)
+    nasdaq_returns = calculate_returns(nasdaq_df, lookback_periods, period_days, 'nasdaq', start_date)
     # sp500_underlying_returns = read_data_from_sqlite(SP500StocksPrice)
     count = 0
     for ticker in tickers:
@@ -424,6 +431,7 @@ def get_top_gainers(tickers: list, lookback_periods: list, mode: str, start_date
             returns = calculate_returns(ticker_df, lookback_periods, period_days, ticker, start_date)
             for period in lookback_periods:
                 returns[f"{period}_SP500_return"] = sp500_returns.get(f"{period}_return", 0)
+                returns[f"{period}_nasdaq_return"] = nasdaq_returns.get(f"{period}_return", 0)
             results.append(returns)
         except Exception as e:
             logging.error(f"Error fetching data for {ticker}: {e}")
@@ -469,6 +477,51 @@ def send_email( recipient: str, subject: str, body: str,report_path: Optional[st
     except Exception as e:
         logging.error(f"Error sending email: {e}")
 
+def generate_market_scanner_report(sp500_tickers, lookback_periods: list, increase_thresholds: list, decrease_thresholds: list, args,current_date, report_name:str) -> None:
+    top_gainers = get_top_gainers(sp500_tickers, lookback_periods, mode=args.mode, start_date=current_date, end_date=current_date+timedelta(days=1))
+        
+    if top_gainers.empty:
+        raise Exception(f"No data available to generate the report for {current_date}")
+      
+    current_date_str = current_date.strftime('%Y-%m-%d')
+    
+    # Enrich top_gainers with sector and industry information
+    top_gainers = enrich_with_sector_industry(top_gainers)
+    
+    report_path = f'reports/{report_name}_{current_date_str}.xlsx'
+    column_output = ["Ticker", "CompanyName","Sector", "Industry",]
+    generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds,current_date_str,column_output, report_name)
+    
+    send_email(
+        recipient=args.recipient,
+        subject=f'Stock Analysis Report {current_date_str}',
+        body=f'Please find the attached {report_name} report for {current_date_str}.',
+        report_path=report_path,
+    )
+    logging.info(f"Market scanner Report for {current_date_str} generated and emailed successfully.")
+
+def generate_watchlist_report(tickers, lookback_periods: list, increase_thresholds: list, decrease_thresholds: list, args,current_date) -> None:
+    top_gainers = get_top_gainers(tickers, lookback_periods, mode=args.mode, start_date=current_date, end_date=current_date+timedelta(days=1))
+        
+    if top_gainers.empty and args.mode == 'rerun':
+        raise Exception(f"No data available to generate the report for {current_date}")
+    
+    current_date_str = current_date.strftime('%Y-%m-%d')
+    
+    # Enrich top_gainers with sector and industry information
+    top_gainers = enrich_with_sector_industry(top_gainers)
+    report_name = "Watchlist"
+    report_path = f'reports/{report_name}_{current_date_str}.xlsx'
+    column_output = ["Ticker", "CompanyName","Sector", "Industry",]
+    generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds,current_date_str,column_output, report_name)
+    
+    send_email(
+        recipient=args.recipient,
+        subject=f'{report_name} {current_date_str}',
+        body=f'Please find the attached {report_name} report for {current_date_str}.',
+        report_path=report_path,
+    )
+    logging.info(f"Market scanner Report for {current_date_str} generated and emailed successfully.")
 
 def main():
     logging.info("Script started.")
@@ -486,33 +539,17 @@ def main():
     decrease_thresholds = [0.05,0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
     lookback_periods = ['1d', '5d', '14d', '21d', '1mo', '2mo', '3mo', '4mo', '5mo', '6mo', '1y']
     
-    sp500_tickers = fetch_sp500_tickers()
+    sp500_tickers = fetch_index_underlying(SP500Holdings)
+    nasdaq_tickers = fetch_index_underlying(NASDAQHoldings)
+    watchlist_tickers =read_data_from_sqlite(WatchListTickers)
     logging.info(f"Fetched {len(sp500_tickers)} S&P 500 tickers.")
 
     date_range = pd.date_range(start=args.start_date, end=args.end_date)
     for current_date in date_range:
-        top_gainers = get_top_gainers(sp500_tickers, lookback_periods, mode=args.mode, start_date=current_date, end_date=current_date+timedelta(days=1))
-        
-        if top_gainers.empty and args.mode == 'rerun':
-            logging.warning(f"No data available to generate the report for {current_date_str} in 'rerun' mode.")
-            print(f"No data available to generate the report for {current_date_str} in 'rerun' mode.")
-            continue
-        current_date_str = current_date.strftime('%Y-%m-%d')
-        
-        # Enrich top_gainers with sector and industry information
-        top_gainers = enrich_with_sector_industry(top_gainers)
-        
-        report_path = f'reports/stock_analysis_report_{current_date_str}.xlsx'
-        column_output = ["Ticker", "CompanyName","Sector", "Industry",]
-        generate_report(top_gainers, lookback_periods, increase_thresholds, decrease_thresholds,current_date_str,column_output)
-        
-        send_email(
-            recipient=args.recipient,
-            subject=f'Stock Analysis Report {current_date_str}',
-            body=f'Please find the attached stock analysis report for {current_date_str}.',
-            report_path=report_path,
-        )
-        logging.info(f"Report for {current_date_str} generated and emailed successfully.")
+        generate_market_scanner_report(sp500_tickers, lookback_periods, increase_thresholds, decrease_thresholds, args,current_date,report_name="SP500 Market Scanner")
+        generate_market_scanner_report(nasdaq_tickers, lookback_periods, increase_thresholds, decrease_thresholds, args,current_date, report_name="NASDAQ Market Scanner")
+        generate_market_scanner_report(watchlist_tickers, lookback_periods, increase_thresholds, decrease_thresholds, args,current_date, report_name="Watchlist Market Scanner")
+        # generate_watchlist_report(watchlist_tickers, lookback_periods, increase_thresholds, decrease_thresholds, args,current_date)
 
     logging.info("Script completed successfully.")
 
@@ -522,6 +559,7 @@ def main():
 if __name__ == "__main__":
     
     alert_emails = os.getenv('ALERT_EMAILS').split(',')
+    sp500_df = ticker_data_processing('initial', '^IXIC', IndexPrice, longest_period='1y')
     try:
         main()
     except Exception as e:

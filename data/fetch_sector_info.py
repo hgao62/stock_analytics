@@ -1,25 +1,28 @@
-from yahoo_data import fetch_sp500_tickers
+from yahoo_data import fetch_index_underlying
 import pandas as pd
 import yfinance as yf
-sp500_tickers = fetch_sp500_tickers()
+from sqlitedb.write import write_data_to_sqlite
+from sqlitedb.models import NASDAQHoldings
+# sp500_tickers = fetch_index_underlying()
+nasdaq_tickers = pd.read_csv('data/static_data/qqq_holdings.csv')['Ticker'].tolist()
 output = []
-for ticker in sp500_tickers:
+for ticker in nasdaq_tickers:
     record = {}
     res = yf.Ticker(ticker)
     record['Ticker'] = ticker
     try:
-        record['sector'] = res.info['sector']
+        record['Sector'] = res.info['sector']
     except:
-        record['sector'] = 'N/A'
+        record['Sector'] = 'N/A'
     try:
-        record['industry'] = res.info['industry']
+        record['Industry'] = res.info['industry']
     except:
-        record['industry'] = 'N/A'
+        record['Industry'] = 'N/A'
         
     try:
-        record['company_name'] = res.info['longName']
+        record['CompanyName'] = res.info['longName']
     except:
-        record['company_name'] = 'N/A'
+        record['CompanyName'] = 'N/A'
     output.append(record)
 df = pd.DataFrame(output,index=False)
-df.to_csv('data/sp500_stocks_sector_industry_info.csv')
+write_data_to_sqlite(NASDAQHoldings,df)

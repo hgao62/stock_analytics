@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from sqlitedb.write import write_data_to_sqlite
 import time
-from sqlitedb.models import SP500StocksPrice,IndexPrice,SP500Holdings,NASDAQHoldings
+from sqlitedb.models import SP500StocksPrice,IndexPrice,SP500Holdings,NASDAQHoldings,StocksPrice
 BATCH_SIZE = 100  # Reduce the batch size to avoid contention
 
 
@@ -46,8 +46,7 @@ def sql_wrapper(path,model):
     write_data_to_sqlite(model,df)
 
 def main():
-    data_dir = r'C:\development\repo\stock_analytics\data'
-    collection_name = 'SP500_stocks_price'
+    data_dir = r'C:\development\repo\stock_analytics\data\archive'
     failed_files = load_stock_data_to_sqlite(data_dir)
     print(f"Failed to load data from the following files: {failed_files}")
     sql_wrapper(r'C:\development\repo\stock_analytics\data\index\SP500.csv', IndexPrice)

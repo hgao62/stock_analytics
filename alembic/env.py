@@ -4,8 +4,7 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
-from sqlitedb.models import Base #1.  Import the Base class from models.py(don't forget to manually change this kobe)
-
+from sqlitedb.models import Base
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -18,7 +17,7 @@ fileConfig(config.config_file_name)
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = Base.metadata #2.  Set the target_metadata to the metadata attribute of the Base class(don't forget to manually change this kobe)
+target_metadata = Base.metadata 
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
