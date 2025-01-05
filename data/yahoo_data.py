@@ -43,7 +43,7 @@ def fetch_sp500_tickers() -> list:
     """
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     try:
-        table = pd.read_csv("sp500.csv")
+        table = pd.read_csv("sp500_holdings.csv")
     except Exception as e:
         table = pd.read_html(url, match="Symbol")[0]  # Automatically parses HTML tables
     tickers = table["Symbol"].tolist()

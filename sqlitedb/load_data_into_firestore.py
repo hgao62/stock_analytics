@@ -1,0 +1,59 @@
+import os
+import pandas as pd
+from sqlitedb.write import write_data_to_sqlite
+import time
+from sqlitedb.models import SP500StocksPrice,IndexPrice,SP500Holdings,NASDAQHoldings
+BATCH_SIZE = 100  # Reduce the batch size to avoid contention
+
+
+
+def load_stock_data_to_sqlite(data_dir: str) -> None:
+    """
+    Load stock data from CSV files into Firestore.
+    
+    Parameters:
+        data_dir (str): Directory containing the stock data CSV files.
+        collection_name (str): Firestore collection name.
+    """
+    i = 1
+    failed_files = []
+    for filename in os.listdir(data_dir):
+        if filename.endswith('.csv'):
+            try:
+                file_path = os.path.join(data_dir, filename)
+                df = pd.read_csv(file_path)
+                df['Date'] = pd.to_datetime(df['Date']).dt.date
+                print((f"DataFrame shape before dropping duplicates: {df.shape}"))
+                duplicates = df.duplicated(subset=['Date', 'Ticker']).sum()
+                print(f"Number of duplicates found: {duplicates}")
+                df = df.drop_duplicates(subset=['Date', 'Ticker'], keep='first')
+                df= df.rename(columns={'Stock Splits': 'StockSplits'
+        })
+
+                print(f"DataFrame shape after dropping duplicates: {df.shape}")
+                write_data_to_sqlite(SP500StocksPrice,df)
+                df.to_csv(file_path, index=False)
+            except Exception as e:
+                print(f"Error loading data from {filename}: {e}")
+                failed_files.append(filename)
+    return failed_files
+
+def sql_wrapper(path,model):
+    df = pd.read_csv(path)
+    if 'Date' in df.columns:
+        df['Date'] = pd.to_datetime(df['Date']).dt.date
+   
+    write_data_to_sqlite(model,df)
+
+def main():
+    data_dir = r'C:\development\repo\stock_analytics\data'
+    collection_name = 'SP500_stocks_price'
+    failed_files = load_stock_data_to_sqlite(data_dir)
+    print(f"Failed to load data from the following files: {failed_files}")
+    sql_wrapper(r'C:\development\repo\stock_analytics\data\index\SP500.csv', IndexPrice)
+    sql_wrapper(r'C:\development\repo\stock_analytics\data\static_data\sp500_stocks_sector_industry_info.csv', SP500Holdings)
+    # sql_wrapper(r'C:\development\repo\stock_analytics\data\static_data\qqq_holdings.csv', NASDAQHoldings)
+
+if __name__ == "__main__":
+    main()
+
