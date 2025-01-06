@@ -1,4 +1,4 @@
-from yahoo_data import fetch_index_underlying
+from yahoo_data import read_tickers
 import pandas as pd
 import yfinance as yf
 from sqlitedb.write import write_data_to_sqlite
@@ -8,6 +8,7 @@ nasdaq_tickers = pd.read_csv('data/static_data/qqq_holdings.csv')['Ticker'].toli
 output = []
 for ticker in nasdaq_tickers:
     record = {}
+    ticker = ticker.strip()
     res = yf.Ticker(ticker)
     record['Ticker'] = ticker
     try:
@@ -24,5 +25,5 @@ for ticker in nasdaq_tickers:
     except:
         record['CompanyName'] = 'N/A'
     output.append(record)
-df = pd.DataFrame(output,index=False)
+df = pd.DataFrame(output)
 write_data_to_sqlite(NASDAQHoldings,df)
