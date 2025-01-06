@@ -20,9 +20,11 @@ from sqlitedb.models import (
     WatchListTickers,
     NASDAQHoldings,
     StocksPrice,
+    Users,
 )
 from sqlitedb.delete import truncate_table
 from sqlitedb.update import update_data_in_sqlite
+from data.watchlist import get_user_tickers
 
 # load environment variable
 load_dotenv()
@@ -259,7 +261,10 @@ def format_worksheet(workbook, worksheet, combined_df):
     for idx, col in enumerate(combined_df.columns):
         if col.endswith("_return"):
             worksheet.set_column(
-                idx, idx, None, workbook.add_format({"num_format": "0.00%"})
+                idx,
+                idx,
+                10,
+                workbook.add_format({"num_format": "0.00%"}),  # Set wider column width
             )
             # Apply conditional formatting with explicit min, mid, and max types
             worksheet.conditional_format(
@@ -280,6 +285,8 @@ def format_worksheet(workbook, worksheet, combined_df):
                     "max_color": "#00FF00",  # Green for positive returns
                 },
             )
+        else:
+            worksheet.set_column(idx, idx, 10)  # Set wider column width
 
 
 def enrich_with_sector_industry(df: pd.DataFrame) -> pd.DataFrame:
@@ -293,8 +300,11 @@ def enrich_with_sector_industry(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: Enriched DataFrame with sector and industry columns.
     """
-    info_df = read_data_from_sqlite(SP500Holdings)
-    enriched_df = df.merge(info_df, on="Ticker", how="left")
+    sp500_sector_df = read_data_from_sqlite(SP500Holdings)
+    nasdq_sector_df = read_data_from_sqlite(NASDAQHoldings)
+    combined_sector_df = pd.concat([sp500_sector_df, nasdq_sector_df])
+    combined_sector_df = combined_sector_df.drop_duplicates(subset=["Ticker"])
+    enriched_df = df.merge(combined_sector_df, on="Ticker", how="left")
     return enriched_df
 
 
@@ -399,6 +409,9 @@ def generate_watch_list_report(
         increase_thresholds (list): List of increase thresholds.
         decrease_thresholds (list): List of decrease thresholds.
     """
+    beginning_cols = ["Ticker", "CompanyName", "Sector", "Industry"]
+    output_columns = beginning_cols + [c for c in df.columns if c not in beginning_cols]
+    df = df[output_columns]
     report_filename = f"reports/{report_name}_{report_date_str}.xlsx"
 
     with pd.ExcelWriter(report_filename, engine="xlsxwriter") as writer:
@@ -732,12 +745,7 @@ def generate_watchlist_report(
     top_gainers = enrich_with_sector_industry(top_gainers)
     report_name = "Watchlist Report"
     report_path = f"reports/{report_name}_{current_date_str}.xlsx"
-    column_output = [
-        "Ticker",
-        "CompanyName",
-        "Sector",
-        "Industry",
-    ]
+
     generate_watch_list_report(top_gainers, current_date_str, report_name)
 
     send_email(
@@ -871,7 +879,6 @@ def initial_laod():
 if __name__ == "__main__":
 
     alert_emails = os.getenv("ALERT_EMAILS").split(",")
-    sp500_tickers = read_tickers(SP500Holdings)
     # load_nasdaq_data(sp500_tickers )
     try:
         main()

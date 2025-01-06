@@ -18,7 +18,7 @@ def add_tickers(tickers):
     session.commit()
     session.close()
     
-def daily_tickers_update(user,tickers_to_add):
+def daily_tickers_update(user, tickers_to_add):
     session = Session()
     user = session.query(Users).filter_by(User=user).first()
     new_tickers = []
@@ -33,6 +33,20 @@ def daily_tickers_update(user,tickers_to_add):
     session.close()
     logging.info(f"Added {new_tickers} to {user}'s watchlist.")
     
+def read_user_tickers(user):
+    session = Session()
+    user = session.query(Users).filter_by(User=user).first()
+    user_tickers = [ticker.Ticker for ticker in user.watchlist_tickers]
+    session.close()
+    logging.info(f"Loaded {user}'s watchlist: {user_tickers}")
+    return user_tickers
+    
+def get_user_tickers(user):
+    new_tickers = load_tickers()
+    daily_tickers_update(user, new_tickers)
+    final_user_tickers = read_user_tickers(user)
+    return final_user_tickers
+    
 def main(mode):
     tickers = load_tickers()
     if mode =='initial':
@@ -41,5 +55,5 @@ def main(mode):
         daily_tickers_update('kobegao',tickers)
 
 if __name__ == "__main__":
-    mode = 'daily'
-    main(mode)
+    res = get_user_tickers('kobegao')
+    print(res)
