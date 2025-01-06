@@ -20,12 +20,11 @@ from sqlitedb.models import (
     WatchListTickers,
     NASDAQHoldings,
     StocksPrice,
-    Users,
+    Users
 )
 from sqlitedb.delete import truncate_table
 from sqlitedb.update import update_data_in_sqlite
 from data.watchlist import get_user_tickers
-
 # load environment variable
 load_dotenv()
 # Email configuration
@@ -286,8 +285,12 @@ def format_worksheet(workbook, worksheet, combined_df):
                 },
             )
         else:
-            worksheet.set_column(idx, idx, 10)  # Set wider column width
-
+            worksheet.set_column(
+                idx,
+                idx,
+                10)  # Set wider column width
+            
+            
 
 def enrich_with_sector_industry(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -759,6 +762,7 @@ def generate_watchlist_report(
     )
 
 
+    
 def main():
     logging.info("Script started.")
     parser = argparse.ArgumentParser(description="Stock Analytics Script")
@@ -811,7 +815,7 @@ def main():
     only_nasdaq_tickers = [
         ticker for ticker in nasdaq_tickers if ticker not in sp500_tickers
     ]
-    watchlist_tickers = read_tickers(WatchListTickers)
+    watchlist_tickers = get_user_tickers("kobegao")
     logging.info(f"Fetched {len(sp500_tickers)} S&P 500 tickers.")
 
     date_range = pd.date_range(start=args.start_date, end=args.end_date)
