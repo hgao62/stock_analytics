@@ -1,6 +1,6 @@
 import pandas as pd
 from sqlitedb.connection import ENGINE, Session
-from sqlitedb.models import SP500StocksPrice
+from sqlitedb.models import SP500StocksPrice,Users
 from typing import Dict, Tuple
 
 def read_data_from_sqlite(model, filters: Dict[str, any] = None, date_range: Tuple[str, str] = None) -> pd.DataFrame:
@@ -46,5 +46,10 @@ def main():
     df = read_data_from_sqlite(SP500StocksPrice, filters, date_range)
     print(df.head())
 
+def read_from_user():
+    df = read_data_from_sqlite(Users)
+    print(df.head())
+
 if __name__ == "__main__":
+    read_from_user()
     main()

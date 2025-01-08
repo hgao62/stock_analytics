@@ -3,6 +3,7 @@ import pandas as pd
 from sqlitedb.write import write_data_to_sqlite
 import time
 from sqlitedb.models import SP500StocksPrice,IndexPrice,SP500Holdings,NASDAQHoldings,StocksPrice
+import sqlitedb.models as models
 BATCH_SIZE = 100  # Reduce the batch size to avoid contention
 
 
@@ -45,6 +46,10 @@ def sql_wrapper(path,model):
    
     write_data_to_sqlite(model,df)
 
+def load_csv_into_db(csv_path, model):
+    df = pd.read_csv(csv_path)
+    write_data_to_sqlite(model, df)
+    print(f"Loaded file{csv_path} into database {model} successfully")
 def main():
     data_dir = r'C:\development\repo\stock_analytics\data\archive'
     failed_files = load_stock_data_to_sqlite(data_dir)
@@ -53,6 +58,7 @@ def main():
     sql_wrapper(r'C:\development\repo\stock_analytics\data\static_data\sp500_stocks_sector_industry_info.csv', SP500Holdings)
     # sql_wrapper(r'C:\development\repo\stock_analytics\data\static_data\qqq_holdings.csv', NASDAQHoldings)
 
+
 if __name__ == "__main__":
-    main()
+   load_csv_into_db(r"C:\development\repo\stock_analytics\data\static_data\Broad_Market_ETFs.csv",models.BroadMarketETFList)
 

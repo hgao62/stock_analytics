@@ -4,6 +4,9 @@ from sqlitedb.connection import ENGINE, Session
 from sqlitedb.models import SP500StocksPrice
 from sqlitedb.delete import truncate_table
 
+import logging
+
+logger = logging.getLogger('stock_analytics')
 def write_data_to_sqlite(model, data: pd.DataFrame,clear_existing_data=False) -> None:
     """
     Write data to a SQLite table using ORM model.
@@ -21,7 +24,8 @@ def write_data_to_sqlite(model, data: pd.DataFrame,clear_existing_data=False) ->
         session.commit()
         print(f"Data written to table {model.__tablename__} successfully.")
     except Exception as e:
-        print(f"Error writing data to SQLite table {model.__tablename__}: {e}")
+        logger.error(f"Error writing data to SQLite table {model.__tablename__}: {e}")
+
     finally:
         session.close()
 

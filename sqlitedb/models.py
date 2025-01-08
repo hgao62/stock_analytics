@@ -82,3 +82,10 @@ class Users(Base):
     Created = Column(Date)
     Updated = Column(Date)
     watchlist_tickers = relationship('WatchListTickers', secondary=watchlist_association, back_populates='users')
+
+class BroadMarketETFList(Base):
+    __tablename__ = 'Broad_Market_ETFs'
+    Ticker = Column(String, primary_key=True)
+    Name = Column(String)
+    Sector = Column(String)
+    Asset_Class = Column(String)

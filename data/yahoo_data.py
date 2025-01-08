@@ -20,8 +20,10 @@ from sqlitedb.models import (
     WatchListTickers,
     NASDAQHoldings,
     StocksPrice,
-    Users
+    Users,
+    BroadMarketETFList,
 )
+from data.broad_market_etfs_analysis import generate_broad_market_monitoring_report_html
 from sqlitedb.delete import truncate_table
 from sqlitedb.update import update_data_in_sqlite
 from data.watchlist import get_user_tickers
@@ -37,23 +39,25 @@ EMAIL_PASSWORD = os.getenv(
 os.makedirs("logs", exist_ok=True)
 
 # Set up logging configuration
-logging.basicConfig(
-    filemode="a",
-    filename="logs/yahoo_data.log",  # Log file path
-    level=logging.INFO,  # Log level
-    format="%(asctime)s - %(levelname)s- %(filename)s:%(lineno)s  - %(message)s",  # Log format
-    datefmt="%Y-%m-%d %H:%M:%S",  # Date format
+logger = logging.getLogger('stock_analytics')
+logger.setLevel(logging.INFO)
+file_handler = logging.FileHandler('logs/yahoo_data.log')
+formatter = logging.Formatter(
+    "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
 )
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
-logging.info("Environment variables loaded.")
-logging.info(f"Email address: {EMAIL_ADDRESS}. Email password: {EMAIL_PASSWORD}")
+logger.info("Environment variables loaded.")
+logger.info(f"Email address: {EMAIL_ADDRESS}. Email password: {EMAIL_PASSWORD}")
 
 TODAY = datetime.now()
 REPORT_DATE = TODAY.strftime("%Y-%m-%d")
 
 
 def read_tickers(model) -> list:
-    logging.info(f"Fetching underlying tickers for {model}.")
+    logger.info(f"Fetching underlying tickers for {model}.")
     """
     Fetch the list of index underlying tickers from sqlite
         list: List of ticker symbols.
@@ -62,7 +66,7 @@ def read_tickers(model) -> list:
     try:
         table = read_data_from_sqlite(model)
     except Exception as e:
-        logging.error(f"Error fetching data from sqlite: {e}")
+        logger.error(f"Error fetching data from sqlite: {e}")
         raise e
     tickers = table["Ticker"].tolist()
     return tickers
@@ -93,17 +97,19 @@ def fetch_stock_data(
         else:
             df = stock.history(period=period)
     except Exception as e:
-        logging.error(f"Error fetching data for {ticker}: {e}")
+        logger.error(f"Error fetching data for {ticker}: {e}")
         raise
     # df.index = pd.to_datetime(df.index, utc=True)  # Set utc=True
     df = df.reset_index()
     df["Date"] = pd.to_datetime(df["Date"]).dt.date
     df["Ticker"] = ticker
+    if "Stock Splits" in df.columns:
+        df = df.rename(columns={"Stock Splits": "StockSplits"})
     return df
 
 
 def get_neighbour_days(start_date) -> list[datetime]:
-    logging.debug(f"Getting neighbour days for start_date {start_date}.")
+    logger.debug(f"Getting neighbour days for start_date {start_date}.")
     """
     Get the previous and next day of the start date
     """
@@ -137,7 +143,7 @@ def calculate_returns(
         try:
             start_date = (report_date - timedelta(days=period_days[period])).date()
         except Exception as e:
-            logging.error(
+            logger.error(
                 f"Error calculating start_date for {ticker} during {period}: {e}"
             )
             print(f"Error calculating start_date for {ticker} during {period}: {e}")
@@ -157,7 +163,7 @@ def calculate_returns(
                     (report_date_price / lookback_date_price - 1), 4
                 )
             except Exception as e:
-                logging.error(
+                logger.error(
                     f"Error calculating return for {ticker} during {period}: {e}"
                 )
                 print(f"Error calculating return for {ticker} during {period}: {e}")
@@ -176,7 +182,7 @@ def calculate_returns(
                         )
                         break
                     except Exception as e:
-                        logging.error(
+                        logger.error(
                             f"Error calculating return for {ticker} on {adj_lookback_date} during {period}: {e}"
                         )
                         returns[f"{period}_return"] = pd.NA
@@ -187,7 +193,7 @@ def calculate_returns(
 
 
 def screen_top_gainers(tickers: list, lookback_periods: list) -> pd.DataFrame:
-    logging.info("Screening top gainers.")
+    logger.info("Screening top gainers.")
     """
     Screen top gainers for a list of tickers over specified lookback periods,
     including S&P 500 returns for each period.
@@ -234,7 +240,7 @@ def screen_top_gainers(tickers: list, lookback_periods: list) -> pd.DataFrame:
                 returns[f"{period}_SP500_return"] = sp500_returns[f"{period}_return"]
             results.append(returns)
         except Exception as e:
-            logging.error(f"Error fetching data for {ticker}: {e}")
+            logger.error(f"Error fetching data for {ticker}: {e}")
             print(f"Error fetching data for {ticker}: {e}")
             continue
 
@@ -243,12 +249,12 @@ def screen_top_gainers(tickers: list, lookback_periods: list) -> pd.DataFrame:
     result_df = result_df.sort_values(
         by=f"{lookback_periods[0]}_return", ascending=False
     )
-    logging.info("Completed screening top gainers.")
+    logger.info("Completed screening top gainers.")
     return result_df
 
 
 def format_worksheet(workbook, worksheet, combined_df):
-    logging.debug("Formatting worksheet.")
+    logger.debug("Formatting worksheet.")
     """
     Format the worksheet with percentage format and conditional formatting.
     
@@ -320,7 +326,7 @@ def generate_report(
     columns: List[str],
     report_name: str,
 ) -> None:
-    logging.info("Generating report.")
+    logger.info("Generating report.")
     """
     Generate a report showing the increase and decrease for each threshold for all lookback periods.
     
@@ -392,17 +398,17 @@ def generate_report(
                 try:
                     format_worksheet(workbook, worksheet, combined_df)
                 except Exception as e:
-                    logging.error(
+                    logger.error(
                         f"Error formatting worksheet for period {period}: {e}"
                     )
 
-    logging.info(f"Report generated successfully: {report_filename}")
+    logger.info(f"Report generated successfully: {report_filename}")
 
 
 def generate_watch_list_report(
     df: pd.DataFrame, report_date_str: str, report_name: str
 ) -> None:
-    logging.info("Generating watchlist report.")
+    logger.info("Generating watchlist report.")
     """
     Generate a report showing the increase and decrease for each threshold for all lookback periods.
     
@@ -425,9 +431,9 @@ def generate_watch_list_report(
         try:
             format_worksheet(workbook, worksheet, df)
         except Exception as e:
-            logging.error(f"Error formatting worksheet  {e}")
+            logger.error(f"Error formatting worksheet  {e}")
 
-    logging.info(f"Watchlist Report generated successfully: {report_filename}")
+    logger.info(f"Watchlist Report generated successfully: {report_filename}")
 
 
 enrich_mapping = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ"}
@@ -532,8 +538,9 @@ def get_top_gainers(
     all_tickers: List[str],
     start_date: Optional[pd.Timestamp] = None,
     end_date: Optional[pd.Timestamp] = None,
+    benchmark_against_sp500: bool = True,
 ) -> pd.DataFrame:
-    logging.info(f"Running get_top_gainers in '{mode}' mode.")
+    logger.info(f"Running get_top_gainers in '{mode}' mode.")
     """
     Screen top gainers for a list of tickers over specified lookback periods,
     including S&P 500 returns for each period.
@@ -570,18 +577,19 @@ def get_top_gainers(
     longest_period = max(lookback_periods, key=lambda x: period_days[x])
 
     # Fetch S&P 500 returns
-    sp500_df = ticker_data_processing(
-        mode, "^GSPC", IndexPrice, start_date, end_date, longest_period
-    )
-    sp500_returns = calculate_returns(
-        sp500_df, lookback_periods, period_days, "S&P500", start_date
-    )
-    nasdaq_df = ticker_data_processing(
-        mode, "^IXIC", IndexPrice, start_date, end_date, longest_period
-    )
-    nasdaq_returns = calculate_returns(
-        nasdaq_df, lookback_periods, period_days, "nasdaq", start_date
-    )
+    if benchmark_against_sp500:
+        sp500_df = ticker_data_processing(
+            mode, "^GSPC", IndexPrice, start_date, end_date, longest_period
+        )
+        sp500_returns = calculate_returns(
+            sp500_df, lookback_periods, period_days, "S&P500", start_date
+        )
+        nasdaq_df = ticker_data_processing(
+            mode, "^IXIC", IndexPrice, start_date, end_date, longest_period
+        )
+        nasdaq_returns = calculate_returns(
+            nasdaq_df, lookback_periods, period_days, "nasdaq", start_date
+        )
 
     count = 0
     for ticker in tickers:
@@ -599,17 +607,18 @@ def get_top_gainers(
             returns = calculate_returns(
                 ticker_df, lookback_periods, period_days, ticker, start_date
             )
-            for period in lookback_periods:
-                returns[f"{period}_SP500_return"] = sp500_returns.get(
-                    f"{period}_return", 0
-                )
-            for period in lookback_periods:
-                returns[f"{period}_nasdaq_return"] = nasdaq_returns.get(
-                    f"{period}_return", 0
-                )
+            if benchmark_against_sp500:
+                for period in lookback_periods:
+                    returns[f"{period}_SP500_return"] = sp500_returns.get(
+                        f"{period}_return", 0
+                    )
+                for period in lookback_periods:
+                    returns[f"{period}_nasdaq_return"] = nasdaq_returns.get(
+                        f"{period}_return", 0
+                    )
             results.append(returns)
         except Exception as e:
-            logging.error(f"Error fetching data for {ticker}: {e}")
+            logger.error(f"Error fetching data for {ticker}: {e}")
             print(f"Error fetching data for {ticker}: {e}")
             continue
         print(f"Processed {count} tickers.")
@@ -618,7 +627,7 @@ def get_top_gainers(
     result_df = result_df.sort_values(
         by=f"{lookback_periods[0]}_return", ascending=False
     )
-    logging.info("Completed getting top gainers.")
+    logger.info("Completed getting top gainers.")
     return result_df
 
 
@@ -627,8 +636,9 @@ def send_email(
     subject: str,
     body: str,
     report_path: Optional[str] = None,
+    html_content: Optional[str] = None,
 ) -> None:
-    logging.info(f"Sending email to {recipient} with subject '{subject}'.")
+    logger.info(f"Sending email to {recipient} with subject '{subject}'.")
     """
     Send an email with the report attached.
 
@@ -643,6 +653,8 @@ def send_email(
     msg["From"] = EMAIL_ADDRESS
     msg["To"] = recipient
     msg.set_content(body)
+    if html_content:
+        msg.add_alternative(html_content, subtype="html")
 
     if report_path:
         # Attach the report
@@ -661,9 +673,9 @@ def send_email(
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
             smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             smtp.send_message(msg)
-        logging.info("Email sent successfully.")
+        logger.info("Email sent successfully.")
     except Exception as e:
-        logging.error(f"Error sending email: {e}")
+        logger.error(f"Error sending email: {e}")
 
 
 def generate_market_scanner_report(
@@ -712,11 +724,11 @@ def generate_market_scanner_report(
 
     send_email(
         recipient=args.recipient,
-        subject=f"Stock Analysis Report {current_date_str}",
+        subject=f"{report_name} Report {current_date_str}",
         body=f"Please find the attached {report_name} report for {current_date_str}.",
         report_path=report_path,
     )
-    logging.info(
+    logger.info(
         f"Market scanner Report for {current_date_str} generated and emailed successfully."
     )
 
@@ -726,7 +738,7 @@ def get_all_tickers():
     return set(all_tickers["Ticker"].unique())
 
 
-def generate_watchlist_report(
+def generate_user_specific_report(
     tickers, lookback_periods: list, args, current_date, all_tickers: List[str] = None
 ) -> None:
 
@@ -757,14 +769,49 @@ def generate_watchlist_report(
         body=f"Please find the attached {report_name} report for {current_date_str}.",
         report_path=report_path,
     )
-    logging.info(
+    logger.info(
         f"Watchlist Report for {current_date_str} generated and emailed successfully."
     )
 
 
+def generate_borad_market_report(
+    tickers, lookback_periods: list, args, current_date, all_tickers: List[str] = None
+) -> None:
+
+    top_gainers = get_top_gainers(
+        tickers,
+        lookback_periods,
+        mode=args.mode,
+        all_tickers=all_tickers,
+        start_date=current_date,
+        end_date=current_date + timedelta(days=1),
+        benchmark_against_sp500=False,
+    )
+
+    if top_gainers.empty and args.mode == "rerun":
+        raise Exception(f"No data available to generate the report for {current_date}")
+
+    current_date_str = current_date.strftime("%Y-%m-%d")
+    report_name = "Broad Market Monitoring Report"
+    broad_market_etf_df = read_data_from_sqlite(BroadMarketETFList)
+    enriched_top_gainers = pd.merge(top_gainers,broad_market_etf_df,how="left",on="Ticker")
+    html_content = generate_broad_market_monitoring_report_html(enriched_top_gainers)
+    send_email(
+        recipient=args.recipient,
+        subject=f"{report_name} {current_date_str}",
+        body=html_content ,
+        html_content=html_content
+    )
+    logger.info(
+        f"Watchlist Report for {current_date_str} generated and emailed successfully."
+    )
+
+
+
+
     
 def main():
-    logging.info("Script started.")
+    logger.info("Script started.")
     parser = argparse.ArgumentParser(description="Stock Analytics Script")
     parser.add_argument(
         "--mode",
@@ -790,7 +837,7 @@ def main():
 
     args = parser.parse_args()
 
-    logging.info(
+    logger.info(
         f"Parameters received - Mode: {args.mode}, Recipient: {args.recipient}, Start Date: {args.start_date}, End Date: {args.end_date}"
     )
 
@@ -816,36 +863,37 @@ def main():
         ticker for ticker in nasdaq_tickers if ticker not in sp500_tickers
     ]
     watchlist_tickers = get_user_tickers("kobegao")
-    logging.info(f"Fetched {len(sp500_tickers)} S&P 500 tickers.")
+    broadmarket_etf_list = read_tickers(BroadMarketETFList)
+    logger.info(f"Fetched {len(sp500_tickers)} S&P 500 tickers.")
 
     date_range = pd.date_range(start=args.start_date, end=args.end_date)
     all_tickers = get_all_tickers()
     for current_date in date_range:
-        generate_market_scanner_report(
-            sp500_tickers,
-            lookback_periods,
-            increase_thresholds,
-            decrease_thresholds,
-            args,
-            current_date,
-            report_name="SP500 Market Scanner",
-            all_tickers=all_tickers,
-        )
-        generate_market_scanner_report(
-            only_nasdaq_tickers,
-            lookback_periods,
-            increase_thresholds,
-            decrease_thresholds,
-            args,
-            current_date,
-            report_name="NASDAQ Market Scanner",
-            all_tickers=all_tickers,
-        )
-        generate_watchlist_report(
-            watchlist_tickers, lookback_periods, args, current_date, all_tickers
-        )
-
-    logging.info("Script completed successfully.")
+        # generate_market_scanner_report(
+        #     sp500_tickers,
+        #     lookback_periods,
+        #     increase_thresholds,
+        #     decrease_thresholds,
+        #     args,
+        #     current_date,
+        #     report_name="SP500 Market Scanner",
+        #     all_tickers=all_tickers,
+        # )
+        # generate_market_scanner_report(
+        #     only_nasdaq_tickers,
+        #     lookback_periods,
+        #     increase_thresholds,
+        #     decrease_thresholds,
+        #     args,
+        #     current_date,
+        #     report_name="NASDAQ Market Scanner",
+        #     all_tickers=all_tickers,
+        # )
+        # generate_user_specific_report(
+        #     watchlist_tickers, lookback_periods, args, current_date, all_tickers
+        # )
+        generate_borad_market_report(broadmarket_etf_list,lookback_periods,args,current_date,all_tickers)
+    logger.info("Script completed successfully.")
 
 
 def load_sp500_data():

@@ -54,3 +54,12 @@ The file should be placed somewhere you can reference in your code
 netstat -a -n -o | findstr :8080
 
 taskkill /PID 23268 /F
+
+
+alembic init alembic
+
+alembic revision --autogenerate -m "Initial migration"
+
+alembic upgrade head
+
+![alt text](image-2.png)
