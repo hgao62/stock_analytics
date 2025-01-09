@@ -1,27 +1,6 @@
 import pandas as pd
 from jinja2 import Template
 
-# # Sample data (replace with your Yahoo Finance API data or CSV input)
-# data = {
-#     "Ticker": ["SPY", "GLD", "TLT", "AAPL"],
-#     "Name": [
-#         "S&P 500 ETF",
-#         "SPDR Gold Shares",
-#         "iShares 20+ Year Treasury Bond ETF",
-#         "Apple Inc."
-#     ],
-#     "Asset Class": ["Equities", "Commodities", "Bonds", "Equities"],
-#     "1d_return": [-0.5, 0.53, 0.21, -0.3],
-#     "5d_return": [-1.2, 1.1, 0.5, -2.0],
-#     "1mo_return": [2.5, 3.0, -1.5, 5.0],
-#     "2mo_return": [5.0, 7.5, -2.0, 10.0],
-#     "6mo_return": [10.0, 15.0, 3.0, 20.0],
-#     "1yr_return": [15.0, 20.0, 5.0, 25.0],
-# }
-
-# # Convert the data dictionary into a Pandas DataFrame
-# df = pd.DataFrame(data)
-
 # HTML template for the report with placeholders for data
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -44,7 +23,7 @@ HTML_TEMPLATE = """
     <title>Broad Market Monitoring Report</title>
 </head>
 <body>
-    <h1 class="header">Broad Market Monitoring Report</h1>
+    <h1 class="header">{{ report_date }} Broad Market Monitoring Report</h1>
     {% for asset_class, items in data.items() %}
         <h2>{{ asset_class }}</h2>
         {% for item in items %}
@@ -70,14 +49,14 @@ def sort_asset_class(data: dict) ->dict:
     sorted_data = {k: data.get(k, None) for k in pre_defined_order}
     return sorted_data
 
-def generate_broad_market_monitoring_report_html(data:pd.DataFrame) ->str:
+def generate_broad_market_monitoring_report_html(data:pd.DataFrame, report_date: str) ->str:
 
     # Group data by "Asset Class" to organize cards by category
     data.to_csv('data/broad_market_etfs.csv', index=False)
     data_grouped = data.groupby("Asset_Class").apply(lambda x: x.to_dict(orient="records")).to_dict()
     data_grouped = sort_asset_class(data_grouped)
     template = Template(HTML_TEMPLATE)
-    html_content = template.render(data=data_grouped)
+    html_content = template.render(data=data_grouped, report_date=report_date)
 
     # Save the rendered HTML content to a file
     output_file = "./reports/broad_market_report.html"
@@ -88,4 +67,5 @@ def generate_broad_market_monitoring_report_html(data:pd.DataFrame) ->str:
     
 if __name__ == "__main__":
     data = pd.read_csv('data/broad_market_etfs.csv')
-    generate_broad_market_monitoring_report_html(data)
+    report_date = "2025-01-09"
+    generate_broad_market_monitoring_report_html(data, report_date)
