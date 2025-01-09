@@ -869,29 +869,29 @@ def main():
     date_range = pd.date_range(start=args.start_date, end=args.end_date)
     all_tickers = get_all_tickers()
     for current_date in date_range:
-        # generate_market_scanner_report(
-        #     sp500_tickers,
-        #     lookback_periods,
-        #     increase_thresholds,
-        #     decrease_thresholds,
-        #     args,
-        #     current_date,
-        #     report_name="SP500 Market Scanner",
-        #     all_tickers=all_tickers,
-        # )
-        # generate_market_scanner_report(
-        #     only_nasdaq_tickers,
-        #     lookback_periods,
-        #     increase_thresholds,
-        #     decrease_thresholds,
-        #     args,
-        #     current_date,
-        #     report_name="NASDAQ Market Scanner",
-        #     all_tickers=all_tickers,
-        # )
-        # generate_user_specific_report(
-        #     watchlist_tickers, lookback_periods, args, current_date, all_tickers
-        # )
+        generate_market_scanner_report(
+            sp500_tickers,
+            lookback_periods,
+            increase_thresholds,
+            decrease_thresholds,
+            args,
+            current_date,
+            report_name="SP500 Market Scanner",
+            all_tickers=all_tickers,
+        )
+        generate_market_scanner_report(
+            only_nasdaq_tickers,
+            lookback_periods,
+            increase_thresholds,
+            decrease_thresholds,
+            args,
+            current_date,
+            report_name="NASDAQ Market Scanner",
+            all_tickers=all_tickers,
+        )
+        generate_user_specific_report(
+            watchlist_tickers, lookback_periods, args, current_date, all_tickers
+        )
         generate_borad_market_report(broadmarket_etf_list,lookback_periods,args,current_date,all_tickers)
     logger.info("Script completed successfully.")
 
@@ -929,14 +929,18 @@ def initial_laod():
 # TODO 1. add sector to the report
 # TODO 2. add company name to the report
 if __name__ == "__main__":
+    data = pd.read_csv('data/broad_market_etfs.csv')
+    report_date = "2025-01-09"
+    res = generate_broad_market_monitoring_report_html(data, report_date)
+    send_email("hgao62@uwo.ca", "Broad Market Monitoring Report", "",html_content=res)
 
-    alert_emails = os.getenv("ALERT_EMAILS").split(",")
-    # load_nasdaq_data(sp500_tickers )
-    try:
-        main()
-    except Exception as e:
-        send_email(
-            recipient=alert_emails,
-            subject="Stock Analysis Report - Error",
-            body=f"An error occurred while running the stock analysis script. {str(e)}",
-        )
+    # alert_emails = os.getenv("ALERT_EMAILS").split(",")
+    # # load_nasdaq_data(sp500_tickers )
+    # try:
+    #     main()
+    # except Exception as e:
+    #     send_email(
+    #         recipient=alert_emails,
+    #         subject="Stock Analysis Report - Error",
+    #         body=f"An error occurred while running the stock analysis script. {str(e)}",
+    #     )
