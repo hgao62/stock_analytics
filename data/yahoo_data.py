@@ -23,7 +23,7 @@ from sqlitedb.models import (
     Users,
     BroadMarketETFList,
 )
-from data.broad_market_etfs_analysis import generate_broad_market_monitoring_report_html
+from data.broad_market_etfs_analysis import generate_broad_market_monitoring_report_html,generate_market_scanner_html_report
 from sqlitedb.delete import truncate_table
 from sqlitedb.update import update_data_in_sqlite
 from data.watchlist import get_user_tickers
@@ -316,8 +316,122 @@ def enrich_with_sector_industry(df: pd.DataFrame) -> pd.DataFrame:
     enriched_df = df.merge(combined_sector_df, on="Ticker", how="left")
     return enriched_df
 
+def filter_data_by_thresholds(
+    increase_thresholds,
+    decrease_thresholds,
+    period: str,
+    df: pd.DataFrame,
+    final_output_columns: list[str],
+) -> pd.DataFrame:
+    """
+    Filter dataframe based on provided thresholds and period returns.
+    This function filters a DataFrame based on threshold values for a given period's returns,
+    creating categories/buckets of data that fall within specified threshold ranges.
+    Args:
+        thresholds (list[float]): List of threshold values to filter the data
+        period (str): Time period to analyze returns (e.g., 'daily', 'weekly', 'monthly')
+        df (pd.DataFrame): Input DataFrame containing return data
+        final_output_columns (list[str]): List of columns to include in the output DataFrame
+        threshold_type (str): Type of threshold being applied (e.g., 'Return', 'Gain', 'Loss')
+    Returns:
+        pd.DataFrame: Filtered DataFrame containing only rows that meet the threshold criteria,
+                     with an additional 'Threshold' column indicating the range.
+    Example:
+        >>> thresholds = [0.05, 0.10, 0.15]
+        >>> filter_data_by_thresholds(thresholds, 'daily', df, ['Date', 'Close'], 'Return')
+        Returns DataFrame with rows where daily returns fall within specified threshold ranges
+    """
+    period_data = []
+    for i, threshold in enumerate(increase_thresholds):
+        if i < len(increase_thresholds) - 1:
+                    next_threshold = increase_thresholds[i + 1]
+                    increase_df = df[
+                        (df[f"{period}_return"] > threshold)
+                        & (df[f"{period}_return"] <= next_threshold)
+                    ]
+        else:
+            increase_df = df[df[f"{period}_return"] > threshold]
 
-def generate_report(
+        if not increase_df.empty:
+            increase_df = increase_df[final_output_columns]
+            increase_df["Threshold"] = (
+                f"{threshold * 100}% < Increase <= {next_threshold * 100}%"
+                if i < len(increase_thresholds) - 1
+                else f"Increase > {threshold * 100}%"
+            )
+            period_data.append(increase_df)
+
+    for i, threshold in enumerate(decrease_thresholds):
+        if i < len(decrease_thresholds) - 1:
+            next_threshold = decrease_thresholds[i + 1]
+            decrease_df = df[
+                (df[f"{period}_return"] < -threshold)
+                & (df[f"{period}_return"] >= -next_threshold)
+            ]
+        else:
+            decrease_df = df[df[f"{period}_return"] < -threshold]
+
+        if not decrease_df.empty:
+            decrease_df = decrease_df[final_output_columns]
+            decrease_df["Threshold"] = (
+                f"{-next_threshold * 100}% <= Decrease < {-threshold * 100}%"
+                if i < len(decrease_thresholds) - 1
+                else f"Decrease < {-threshold * 100}%"
+            )
+            period_data.append(decrease_df)
+    return period_data
+from typing import List
+def prepare_report_data( 
+    df: pd.DataFrame ,                   
+    lookback_periods: List[str],
+    increase_thresholds: List[float],
+    decrease_thresholds: List[float],
+
+    columns: List[str],
+    ) -> List[dict]:
+    final_output_data = {}
+    for period in lookback_periods:
+        final_output_columns = columns + [
+            f"{period}_return",
+            f"{period}_SP500_return",
+        ]
+        period_data = filter_data_by_thresholds(
+            increase_thresholds, decrease_thresholds,period, df, final_output_columns, 
+        )
+
+        if period_data:
+            combined_df = pd.concat(period_data)
+            combined_df = combined_df.sort_values(
+                by=f"{period}_return", ascending=False
+            )
+            
+            final_output_data[period] = combined_df.to_dict(orient="records")
+    return final_output_data
+    
+def generate_html_report(df: pd.DataFrame,
+    lookback_periods: list,
+    increase_thresholds: list,
+    decrease_thresholds: list,
+    report_date_str: str,
+    columns: List[str],
+    report_name: str) ->None:
+
+
+    report_data = prepare_report_data(
+        df,
+        lookback_periods,
+        increase_thresholds,
+        decrease_thresholds,
+        columns,
+    )
+    df.to_csv(f"data/{report_name}.csv")
+    html_content = generate_market_scanner_html_report(report_data,report_date_str,report_name)
+    logger.info(f"Report generated successfully: {report_name}")
+    return html_content
+    
+
+    
+def generate_excel_report(
     df: pd.DataFrame,
     lookback_periods: list,
     increase_thresholds: list,
@@ -347,43 +461,16 @@ def generate_report(
             ]
             period_data = []
 
-            for i, threshold in enumerate(increase_thresholds):
-                if i < len(increase_thresholds) - 1:
-                    next_threshold = increase_thresholds[i + 1]
-                    increase_df = df[
-                        (df[f"{period}_return"] > threshold)
-                        & (df[f"{period}_return"] <= next_threshold)
-                    ]
-                else:
-                    increase_df = df[df[f"{period}_return"] > threshold]
+           
+            increase_df = filter_data_by_thresholds(
+                increase_thresholds, period, df, final_output_columns, "Increase"
+            )
+            period_data.append(increase_df)
 
-                if not increase_df.empty:
-                    increase_df = increase_df[final_output_columns]
-                    increase_df["Threshold"] = (
-                        f"{threshold * 100}% < Increase <= {next_threshold * 100}%"
-                        if i < len(increase_thresholds) - 1
-                        else f"Increase > {threshold * 100}%"
-                    )
-                    period_data.append(increase_df)
-
-            for i, threshold in enumerate(decrease_thresholds):
-                if i < len(decrease_thresholds) - 1:
-                    next_threshold = decrease_thresholds[i + 1]
-                    decrease_df = df[
-                        (df[f"{period}_return"] < -threshold)
-                        & (df[f"{period}_return"] >= -next_threshold)
-                    ]
-                else:
-                    decrease_df = df[df[f"{period}_return"] < -threshold]
-
-                if not decrease_df.empty:
-                    decrease_df = decrease_df[final_output_columns]
-                    decrease_df["Threshold"] = (
-                        f"{-next_threshold * 100}% <= Decrease < {-threshold * 100}%"
-                        if i < len(decrease_thresholds) - 1
-                        else f"Decrease < {-threshold * 100}%"
-                    )
-                    period_data.append(decrease_df)
+            decrease_df = filter_data_by_thresholds(
+                decrease_thresholds, period, df, final_output_columns, "Decrease"
+            )   
+            period_data.append(decrease_df)
 
             if period_data:
                 combined_df = pd.concat(period_data)
@@ -561,6 +648,7 @@ def get_top_gainers(
     # Convert periods to days for comparison
     period_days = {
         "1d": 1,
+        "3d": 3,
         "5d": 5,
         "14d": 14,
         "21d": 21,
@@ -574,6 +662,7 @@ def get_top_gainers(
         # '2y': 730,
         # '5y': 1825
     }
+    
     longest_period = max(lookback_periods, key=lambda x: period_days[x])
 
     # Fetch S&P 500 returns
@@ -712,21 +801,28 @@ def generate_market_scanner_report(
         "Sector",
         "Industry",
     ]
-    generate_report(
-        top_gainers,
+    # generate_excel_report(
+    #     top_gainers,
+    #     lookback_periods,
+    #     increase_thresholds,
+    #     decrease_thresholds,
+    #     current_date_str,
+    #     column_output,
+    #     report_name,
+    # )
+    html_content = generate_html_report(top_gainers,
         lookback_periods,
         increase_thresholds,
         decrease_thresholds,
         current_date_str,
         column_output,
-        report_name,
+        report_name
     )
-
     send_email(
         recipient=args.recipient,
         subject=f"{report_name} Report {current_date_str}",
-        body=f"Please find the attached {report_name} report for {current_date_str}.",
-        report_path=report_path,
+        body="",
+        html_content=html_content,
     )
     logger.info(
         f"Market scanner Report for {current_date_str} generated and emailed successfully."
@@ -774,7 +870,7 @@ def generate_user_specific_report(
     )
 
 
-def generate_borad_market_report(
+def generate_broad_market_report(
     tickers, lookback_periods: list, args, current_date, all_tickers: List[str] = None
 ) -> None:
 
@@ -795,7 +891,7 @@ def generate_borad_market_report(
     report_name = "Broad Market Monitoring Report"
     broad_market_etf_df = read_data_from_sqlite(BroadMarketETFList)
     enriched_top_gainers = pd.merge(top_gainers,broad_market_etf_df,how="left",on="Ticker")
-    html_content = generate_broad_market_monitoring_report_html(enriched_top_gainers)
+    html_content = generate_broad_market_monitoring_report_html(enriched_top_gainers,current_date.strftime("%Y-%m-%d"))
     send_email(
         recipient=args.recipient,
         subject=f"{report_name} {current_date_str}",
@@ -845,6 +941,7 @@ def main():
     decrease_thresholds = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
     lookback_periods = [
         "1d",
+        "3d",
         "5d",
         "14d",
         "21d",
@@ -892,7 +989,7 @@ def main():
         generate_user_specific_report(
             watchlist_tickers, lookback_periods, args, current_date, all_tickers
         )
-        generate_borad_market_report(broadmarket_etf_list,lookback_periods,args,current_date,all_tickers)
+        generate_broad_market_report(broadmarket_etf_list,lookback_periods,args,current_date,all_tickers)
     logger.info("Script completed successfully.")
 
 
@@ -929,18 +1026,46 @@ def initial_laod():
 # TODO 1. add sector to the report
 # TODO 2. add company name to the report
 if __name__ == "__main__":
-    data = pd.read_csv('data/broad_market_etfs.csv')
-    report_date = "2025-01-09"
-    res = generate_broad_market_monitoring_report_html(data, report_date)
-    send_email("hgao62@uwo.ca", "Broad Market Monitoring Report", "",html_content=res)
+    # data = pd.read_csv('data/broad_market_etfs.csv')
+    # report_date = "2025-01-09"
+    # res = generate_broad_market_monitoring_report_html(data, report_date)
+    # send_email("hgao62@uwo.ca", "Broad Market Monitoring Report", "",html_content=res)
 
-    # alert_emails = os.getenv("ALERT_EMAILS").split(",")
-    # # load_nasdaq_data(sp500_tickers )
-    # try:
-    #     main()
-    # except Exception as e:
-    #     send_email(
-    #         recipient=alert_emails,
-    #         subject="Stock Analysis Report - Error",
-    #         body=f"An error occurred while running the stock analysis script. {str(e)}",
-    #     )
+
+    alert_emails = os.getenv("ALERT_EMAILS").split(",")
+    # load_nasdaq_data(sp500_tickers )
+    # df = pd.read_csv("data/SP500 Market Scanner.csv")
+    # lookback_periods = [
+    #     "1d",
+    #     "3d",
+    #     "5d",
+    #     "14d",
+    #     "21d",
+    #     "1mo",
+    #     "2mo",
+    #     "3mo",
+    #     "4mo",
+    #     "5mo",
+    #     "6mo",
+    #     "1y",
+    # ]
+    # increase_thresholds = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
+    # decrease_thresholds = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
+    # columns =  [
+    #     "Ticker",
+    #     "CompanyName",
+    #     "Sector",
+    #     "Industry",
+    # ]
+    # res =prepare_report_data(df,lookback_periods,increase_thresholds,decrease_thresholds,columns)
+    # html_content = generate_market_scanner_html_report(res,"2024-01-09","Market Scanner")
+    # send_email("hgao62@uwo.ca","test","test",html_content=html_content)
+    
+    try:
+        main()
+    except Exception as e:
+        send_email(
+            recipient=alert_emails,
+            subject="Stock Analysis Report - Error",
+            body=f"An error occurred while running the stock analysis script. {str(e)}",
+        )
