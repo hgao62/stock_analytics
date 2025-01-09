@@ -38,25 +38,26 @@ HTML_TEMPLATE = """
         .returns span { display: inline-block; width: 100px; }
         .positive { color: green; }
         .negative { color: red; }
+        .percentage { display: inline-block; width: 100px; text-align: right; }
+        .header { text-align: center; }  /* Center align the header */
     </style>
     <title>Broad Market Monitoring Report</title>
 </head>
 <body>
-    <h1>Broad Market Monitoring Report</h1>
+    <h1 class="header">Broad Market Monitoring Report</h1>
     {% for asset_class, items in data.items() %}
         <h2>{{ asset_class }}</h2>
         {% for item in items %}
         <div class="card">
-            <h2>{{ item['Name'] }}</h2>
-            <p><strong>Sector:</strong> {{ item['Sector'] }}</p>
-            <p><strong>Ticker:</strong> {{ item['Ticker'] }}</p>
+            <h2>{{ item['Sector'] }}</h2>
+            <p><strong>{{ item['Name'] }} ({{ item['Ticker'] }})</p>
             <!-- Highlight positive/negative returns with appropriate class -->
-            <p><strong>1 Day Return:</strong> <span class="{{ 'positive' if item['1d_return'] > 0 else 'negative' }}">{{ item['1d_return'] }}%</span></p>
-            <p><strong>5 Day Return:</strong> <span class="{{ 'positive' if item['5d_return'] > 0 else 'negative' }}">{{ item['5d_return'] }}%</span></p>
-            <p><strong>1 Month Return:</strong> <span class="{{ 'positive' if item['1mo_return'] > 0 else 'negative' }}">{{ item['1mo_return'] }}%</span></p>
-            <p><strong>2 Month Return:</strong> <span class="{{ 'positive' if item['2mo_return'] > 0 else 'negative' }}">{{ item['2mo_return'] }}%</span></p>
-            <p><strong>6 Month Return:</strong> <span class="{{ 'positive' if item['6mo_return'] > 0 else 'negative' }}">{{ item['6mo_return'] }}%</span></p>
-            <p><strong>1 Year Return:</strong> <span class="{{ 'positive' if item['1y_return'] > 0 else 'negative' }}">{{ item['1yr_return'] }}%</span></p>
+            <p><strong>1 Day Return:</strong> <span class="percentage {{ 'positive' if item['1d_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['1d_return'] * 100) }}</span></p>
+            <p><strong>5 Day Return:</strong> <span class="percentage {{ 'positive' if item['5d_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['5d_return'] * 100) }}</span></p>
+            <p><strong>1 Month Return:</strong> <span class="percentage {{ 'positive' if item['1mo_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['1mo_return'] * 100) }}</span></p>
+            <p><strong>2 Month Return:</strong> <span class="percentage {{ 'positive' if item['2mo_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['2mo_return'] * 100) }}</span></p>
+            <p><strong>6 Month Return:</strong> <span class="percentage {{ 'positive' if item['6mo_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['6mo_return'] * 100) }}</span></p>
+            <p><strong>1 Year Return:</strong> <span class="percentage {{ 'positive' if item['1y_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['1y_return'] * 100) }}</span></p>
         </div>
         {% endfor %}
     {% endfor %}
