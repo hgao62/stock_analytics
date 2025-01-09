@@ -10,35 +10,93 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
-        .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 16px; width: 300px; display: inline-block; vertical-align: top; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); }
-        .card h2 { margin: 0; font-size: 20px; color: #333; }
-        .card p { margin: 5px 0; font-size: 14px; }
-        .returns { margin-top: 10px; }
-        .returns span { display: inline-block; width: 100px; }
+        h1 { font-size: 28px; margin-bottom: 20px; }
+        h2 { font-size: 20px; color: #333; margin-top: 30px; }
+        table { 
+            width: auto; 
+            border-collapse: collapse; 
+            margin-top: 10px; 
+            table-layout: fixed;
+        }
+        th, td { 
+            border: 1px solid #ddd; 
+            padding: 4px 8px; 
+            text-align: center;
+        }
+        th { background-color: #f4f4f4; font-weight: bold; }
+        .ticker { color: #1e90ff; font-weight: bold; } /* Ticker styling */
         .positive { color: green; }
         .negative { color: red; }
-        .percentage { display: inline-block; width: 100px; text-align: right; }
-        .header { text-align: center; }  /* Center align the header */
+        .separator { border-top: 2px dashed yellow; margin: 20px 0; }
+        .header {
+            text-align: center;
+        }
+        .name-column {
+            max-width: 200px;
+            min-width: 150px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .return-column {
+            width: 60px;
+            white-space: nowrap;
+            padding: 4px;
+        }
+        .ticker-column {
+            width: 50px;
+            white-space: nowrap;
+            color: #1e90ff; 
+            font-weight: bold; 
+        }
     </style>
     <title>Broad Market Monitoring Report</title>
 </head>
 <body>
-    <h1 class="header">{{ report_date }} Broad Market Monitoring Report</h1>
+    <h1 class="header">{{ report_date }}</h1>
+    <h1 class="header">Broad Market Monitoring Report</h1>
     {% for asset_class, items in data.items() %}
         <h2>{{ asset_class }}</h2>
-        {% for item in items %}
-        <div class="card">
-            <h2>{{ item['Sector'] }}</h2>
-            <p><strong>{{ item['Name'] }} ({{ item['Ticker'] }})</p>
-            <!-- Highlight positive/negative returns with appropriate class -->
-            <p><strong>1 Day Return:</strong> <span class="percentage {{ 'positive' if item['1d_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['1d_return'] * 100) }}</span></p>
-            <p><strong>5 Day Return:</strong> <span class="percentage {{ 'positive' if item['5d_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['5d_return'] * 100) }}</span></p>
-            <p><strong>1 Month Return:</strong> <span class="percentage {{ 'positive' if item['1mo_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['1mo_return'] * 100) }}</span></p>
-            <p><strong>2 Month Return:</strong> <span class="percentage {{ 'positive' if item['2mo_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['2mo_return'] * 100) }}</span></p>
-            <p><strong>6 Month Return:</strong> <span class="percentage {{ 'positive' if item['6mo_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['6mo_return'] * 100) }}</span></p>
-            <p><strong>1 Year Return:</strong> <span class="percentage {{ 'positive' if item['1y_return'] > 0 else 'negative' }}">{{ '%.2f%%' % (item['1y_return'] * 100) }}</span></p>
-        </div>
-        {% endfor %}
+        <table>
+            <thead>
+                <tr>
+                    <th class="ticker-column">Ticker</th>
+                    <th class="name-column">Name</th>
+                    <th class="return-column">1 Day</th>
+                    <th class="return-column">5 Day</th>
+                    <th class="return-column">1 Month</th>
+                    <th class="return-column">2 Month</th>
+                    <th class="return-column">6 Month</th>
+                    <th class="return-column">1 Year</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td class="ticker-column">{{ item['Ticker'] }}</td>
+                    <td class="name-column">{{ item['Name'] }}</td>
+                    <td class="return-column {{ 'positive' if item['1d_return'] > 0 else 'negative' }}">
+                        {{ '%.2f%%' % (item['1d_return'] * 100) }}
+                    </td>
+                    <td class="return-column {{ 'positive' if item['5d_return'] > 0 else 'negative' }}">
+                        {{ '%.2f%%' % (item['5d_return'] * 100) }}
+                    </td>
+                    <td class="return-column {{ 'positive' if item['1mo_return'] > 0 else 'negative' }}">
+                        {{ '%.2f%%' % (item['1mo_return'] * 100) }}
+                    </td>
+                    <td class="return-column {{ 'positive' if item['2mo_return'] > 0 else 'negative' }}">
+                        {{ '%.2f%%' % (item['2mo_return'] * 100) }}
+                    </td>
+                    <td class="return-column {{ 'positive' if item['6mo_return'] > 0 else 'negative' }}">
+                        {{ '%.2f%%' % (item['6mo_return'] * 100) }}
+                    </td>
+                    <td class="return-column {{ 'positive' if item['1y_return'] > 0 else 'negative' }}">
+                        {{ '%.2f%%' % (item['1y_return'] * 100) }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     {% endfor %}
 </body>
 </html>
@@ -68,4 +126,4 @@ def generate_broad_market_monitoring_report_html(data:pd.DataFrame, report_date:
 if __name__ == "__main__":
     data = pd.read_csv('data/broad_market_etfs.csv')
     report_date = "2025-01-09"
-    generate_broad_market_monitoring_report_html(data, report_date)
+    res = generate_broad_market_monitoring_report_html(data, report_date)
