@@ -1,0 +1,37 @@
+Ticker,Name,Sector,Asset_Class
+XLK,Technology Select Sector SPDR Fund,Technology,Equities
+XLV,Health Care Select Sector SPDR Fund,Healthcare,Equities
+XLF,Financial Select Sector SPDR Fund,Financials,Equities
+XLE,Energy Select Sector SPDR Fund,Energy,Equities
+XLP,Consumer Staples Select Sector SPDR Fund,Consumer Staples,Equities
+TLT,iShares 20+ Year Treasury Bond ETF,Treasuries,Bonds
+LQD,iShares iBoxx $ Investment Grade Corporate Bond ETF,Corporate Bonds,Bonds
+HYG,iShares iBoxx $ High Yield Corporate Bond ETF,High-Yield Bonds,Bonds
+SHY,iShares 1-3 Year Treasury Bond ETF,Consumer Staples,Bonds
+GLD,SPDR Gold Shares,Gold,Commodities
+USO,United States Oil Fund,Oil,Commodities
+VNQ,Vanguard Real Estate ETF,REITs,Real Estate
+EEM,iShares MSCI Emerging Markets ETF,Emerging Markets,International Markets
+VEA,Vanguard FTSE Developed Markets ETF,Developed Markets,International Markets
+XLU,Utilities Select Sector SPDR Fund,Utilities,Diversifiers
+XLY,Consumer Discretionary Select Sector SPDR Fund,Consumer Discretionary,Diversifiers
+SPY,SPDR S&P 500 ETF Trust,S&P 500,Market-Wide Indicators
+QQQ,Invesco QQQ Trust,Nasdaq-100,Market-Wide Indicators
+IWM,iShares Russell 2000 ETF,Russell 2000,Market-Wide Indicators
+BITO,ProShares Bitcoin Strategy ETF,Bitcoin,Alternative Assets
+GDX,VanEck Gold Miners ETF,Gold Miners,Defensive Sectors
+UUP,Invesco DB US Dollar Index Bullish Fund,US Dollar,Currency
+FXY,Invesco CurrencyShares Japanese Yen Trust,Japanese Yen,Currency
+FXE,Invesco CurrencyShares Euro Trust,Euro,Currency
+SLV,iShares Silver Trust,Silver,Commodities
+CPER,United States Copper Index Fund,Copper,Commodities
+UNG,United States Natural Gas Fund,Natural Gas,Commodities
+DBA,Invesco DB Agriculture Fund,Agriculture,Commodities
+DBC,Invesco DB Commodity Index Tracking Fund,Broad Commodity Index,Commodities
+CORN,Teucrium Corn Fund,Corn,Commodities
+VDC,Vanguard Consumer Staples ETF,Consumer Staples,Defensive Sectors
+IDU,iShares U.S. Utilities ETF,Utilities,Defensive Sectors
+VHT,Vanguard Health Care ETF,Healthcare,Defensive Sectors
+IYR,iShares U.S. Real Estate ETF,Real Estate,Defensive Sectors
+IEI,iShares 7-10 Year Treasury Bond ETF,Treasuries,Bonds
+IEF,iShares 7-10 Year Treasury Bond ETF,Treasuries,Bonds

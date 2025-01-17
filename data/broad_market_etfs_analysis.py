@@ -156,7 +156,7 @@ HTML_TEMPLATE2 = """
     <h1 class="header">{{ report_date }}</h1>
     <h1 class="header">{{report_name}} Report</h1>
     {% for period, items in data.items() %}
-        <h2>{{ period}}</h2>
+        <h2>{{ period}} Returns</h2>
         <table>
             <thead>
                 <tr>

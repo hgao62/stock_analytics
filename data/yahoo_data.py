@@ -25,15 +25,14 @@ from sqlitedb.models import (
 )
 from data.broad_market_etfs_analysis import generate_broad_market_monitoring_report_html,generate_market_scanner_html_report
 from sqlitedb.delete import truncate_table
-from sqlitedb.update import update_data_in_sqlite
+from sqlitedb.update import upsert_data_in_sqlite
 from data.watchlist import get_user_tickers
+from data.utilities import send_email,format_worksheet,get_neighbour_days,fetch_stock_data,read_tickers,get_all_tickers
+from data.report_generating import generate_html_report,generate_excel_report,generate_watch_list_report,generate_market_scanner_html_report
+import traceback  # Add this import
 # load environment variable
 load_dotenv()
 # Email configuration
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")  # Your email address
-EMAIL_PASSWORD = os.getenv(
-    "EMAIL_PASSWORD"
-)  # Your email password or app-specific password
 
 # Ensure the 'logs' directory exists
 os.makedirs("logs", exist_ok=True)
@@ -50,76 +49,13 @@ file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
 logger.info("Environment variables loaded.")
-logger.info(f"Email address: {EMAIL_ADDRESS}. Email password: {EMAIL_PASSWORD}")
 
 TODAY = datetime.now()
 REPORT_DATE = TODAY.strftime("%Y-%m-%d")
 
 
-def read_tickers(model) -> list:
-    logger.info(f"Fetching underlying tickers for {model}.")
-    """
-    Fetch the list of index underlying tickers from sqlite
-        list: List of ticker symbols.
-    """
-
-    try:
-        table = read_data_from_sqlite(model)
-    except Exception as e:
-        logger.error(f"Error fetching data from sqlite: {e}")
-        raise e
-    tickers = table["Ticker"].tolist()
-    return tickers
 
 
-def fetch_stock_data(
-    ticker: str,
-    period: Optional[str] = None,
-    start_date: Optional[pd.Timestamp] = None,
-    end_date: Optional[pd.Timestamp] = None,
-) -> pd.DataFrame:
-    """
-    Fetch historical stock data for a specific ticker from Yahoo Finance.
-
-    Parameters:
-        ticker (str): Stock ticker symbol.
-        period (Optional[str]): Period string for Yahoo Finance API (e.g., '1mo', '3mo', '1y').
-        start_date (Optional[str]): Start date for fetching data.
-        end_date (Optional[str]): End date for fetching data.
-
-    Returns:
-        pd.DataFrame: DataFrame with historical stock data.
-    """
-    stock = yf.Ticker(ticker)
-    try:
-        if start_date and end_date:
-            df = stock.history(start=start_date, end=end_date)
-        else:
-            df = stock.history(period=period)
-    except Exception as e:
-        logger.error(f"Error fetching data for {ticker}: {e}")
-        raise
-    # df.index = pd.to_datetime(df.index, utc=True)  # Set utc=True
-    df = df.reset_index()
-    df["Date"] = pd.to_datetime(df["Date"]).dt.date
-    df["Ticker"] = ticker
-    if "Stock Splits" in df.columns:
-        df = df.rename(columns={"Stock Splits": "StockSplits"})
-    return df
-
-
-def get_neighbour_days(start_date) -> list[datetime]:
-    logger.debug(f"Getting neighbour days for start_date {start_date}.")
-    """
-    Get the previous and next day of the start date
-    """
-    res = []
-    for i in range(1, 4):
-        adjust_start_date_backwards = start_date - timedelta(days=i)
-        adjust_start_date_forwards = start_date + timedelta(days=i)
-        res.append(adjust_start_date_backwards)
-        res.append(adjust_start_date_forwards)
-    return res
 
 
 def calculate_returns(
@@ -153,8 +89,14 @@ def calculate_returns(
         # Convert start_date to pandas Timestamp and normalize
         # start_date_normalized = pd.Timestamp(start_date).normalize().tz_localize('UTC')
         # Normalize dates to ignore timezone and other attributes
-
-        report_date_price = df[df["Date"] == report_date.date()]["Close"].values[0]
+        report_date_data = df[df["Date"] == report_date.date()]["Close"]
+        if report_date_data.empty:
+            logger.error(f"No data found for {ticker} on {report_date.date()}")
+            print(f"No data found for {ticker} on {report_date.date()}")
+            raise Exception(f"No data found for {ticker} on {report_date.date()}")
+        else:
+            
+            report_date_price = report_date_data.values[0]
         if start_date in df["Date"].values:
             try:
 
@@ -192,112 +134,6 @@ def calculate_returns(
     return returns
 
 
-def screen_top_gainers(tickers: list, lookback_periods: list) -> pd.DataFrame:
-    logger.info("Screening top gainers.")
-    """
-    Screen top gainers for a list of tickers over specified lookback periods,
-    including S&P 500 returns for each period.
-    
-    Parameters:
-        tickers (list): List of stock tickers.
-        lookback_periods (list): List of periods for which to calculate returns.
-    
-    Returns:
-        pd.DataFrame: DataFrame with returns for each ticker and time period,
-                      including S&P 500 returns.
-    """
-    results = []
-
-    # Convert periods to days for comparison
-    period_days = {
-        "1d": 1,
-        "5d": 5,
-        "14d": 14,
-        "21d": 21,
-        "1mo": 30,
-        "2mo": 60,
-        "3mo": 90,
-        "4mo": 120,
-        "5mo": 150,
-        "6mo": 180,
-        "1y": 365,
-        # '2y': 730,
-        # '5y': 1825
-    }
-    longest_period = max(lookback_periods, key=lambda x: period_days[x])
-
-    # Fetch S&P 500 returns
-    sp500_df = fetch_stock_data("^GSPC", longest_period)
-    sp500_returns = calculate_returns(sp500_df, lookback_periods, period_days, "S&P500")
-
-    for ticker in tickers:
-        try:
-            df = fetch_stock_data(ticker, longest_period)
-            df.to_csv(f"data/{ticker}.csv")
-            returns = calculate_returns(df, lookback_periods, period_days, ticker)
-            # Add S&P 500 returns to each ticker's returns
-            for period in lookback_periods:
-                returns[f"{period}_SP500_return"] = sp500_returns[f"{period}_return"]
-            results.append(returns)
-        except Exception as e:
-            logger.error(f"Error fetching data for {ticker}: {e}")
-            print(f"Error fetching data for {ticker}: {e}")
-            continue
-
-    # Convert results to a DataFrame
-    result_df = pd.DataFrame(results)
-    result_df = result_df.sort_values(
-        by=f"{lookback_periods[0]}_return", ascending=False
-    )
-    logger.info("Completed screening top gainers.")
-    return result_df
-
-
-def format_worksheet(workbook, worksheet, combined_df):
-    logger.debug("Formatting worksheet.")
-    """
-    Format the worksheet with percentage format and conditional formatting.
-    
-    Parameters:
-        workbook: The workbook object.
-        worksheet: The worksheet object.
-        combined_df: The combined DataFrame.
-    """
-    for idx, col in enumerate(combined_df.columns):
-        if col.endswith("_return"):
-            worksheet.set_column(
-                idx,
-                idx,
-                10,
-                workbook.add_format({"num_format": "0.00%"}),  # Set wider column width
-            )
-            # Apply conditional formatting with explicit min, mid, and max types
-            worksheet.conditional_format(
-                1,
-                idx,
-                len(combined_df),
-                idx,
-                {
-                    "type": "3_color_scale",
-                    "min_type": "num",
-                    "min_value": combined_df[col].min(),
-                    "mid_type": "num",
-                    "mid_value": 0,
-                    "max_type": "num",
-                    "max_value": combined_df[col].max(),
-                    "min_color": "#FF0000",  # Red for negative returns
-                    "mid_color": "#FFFFFF",  # White for zero return
-                    "max_color": "#00FF00",  # Green for positive returns
-                },
-            )
-        else:
-            worksheet.set_column(
-                idx,
-                idx,
-                10)  # Set wider column width
-            
-            
-
 def enrich_with_sector_industry(df: pd.DataFrame) -> pd.DataFrame:
     """
     Enrich the DataFrame with sector and industry information.
@@ -316,211 +152,9 @@ def enrich_with_sector_industry(df: pd.DataFrame) -> pd.DataFrame:
     enriched_df = df.merge(combined_sector_df, on="Ticker", how="left")
     return enriched_df
 
-def filter_data_by_thresholds(
-    increase_thresholds,
-    decrease_thresholds,
-    period: str,
-    df: pd.DataFrame,
-    final_output_columns: list[str],
-) -> pd.DataFrame:
-    """
-    Filter dataframe based on provided thresholds and period returns.
-    This function filters a DataFrame based on threshold values for a given period's returns,
-    creating categories/buckets of data that fall within specified threshold ranges.
-    Args:
-        thresholds (list[float]): List of threshold values to filter the data
-        period (str): Time period to analyze returns (e.g., 'daily', 'weekly', 'monthly')
-        df (pd.DataFrame): Input DataFrame containing return data
-        final_output_columns (list[str]): List of columns to include in the output DataFrame
-        threshold_type (str): Type of threshold being applied (e.g., 'Return', 'Gain', 'Loss')
-    Returns:
-        pd.DataFrame: Filtered DataFrame containing only rows that meet the threshold criteria,
-                     with an additional 'Threshold' column indicating the range.
-    Example:
-        >>> thresholds = [0.05, 0.10, 0.15]
-        >>> filter_data_by_thresholds(thresholds, 'daily', df, ['Date', 'Close'], 'Return')
-        Returns DataFrame with rows where daily returns fall within specified threshold ranges
-    """
-    period_data = []
-    for i, threshold in enumerate(increase_thresholds):
-        if i < len(increase_thresholds) - 1:
-                    next_threshold = increase_thresholds[i + 1]
-                    increase_df = df[
-                        (df[f"{period}_return"] > threshold)
-                        & (df[f"{period}_return"] <= next_threshold)
-                    ]
-        else:
-            increase_df = df[df[f"{period}_return"] > threshold]
 
-        if not increase_df.empty:
-            increase_df = increase_df[final_output_columns]
-            increase_df["Threshold"] = (
-                f"{threshold * 100}% < Increase <= {next_threshold * 100}%"
-                if i < len(increase_thresholds) - 1
-                else f"Increase > {threshold * 100}%"
-            )
-            period_data.append(increase_df)
-
-    for i, threshold in enumerate(decrease_thresholds):
-        if i < len(decrease_thresholds) - 1:
-            next_threshold = decrease_thresholds[i + 1]
-            decrease_df = df[
-                (df[f"{period}_return"] < -threshold)
-                & (df[f"{period}_return"] >= -next_threshold)
-            ]
-        else:
-            decrease_df = df[df[f"{period}_return"] < -threshold]
-
-        if not decrease_df.empty:
-            decrease_df = decrease_df[final_output_columns]
-            decrease_df["Threshold"] = (
-                f"{-next_threshold * 100}% <= Decrease < {-threshold * 100}%"
-                if i < len(decrease_thresholds) - 1
-                else f"Decrease < {-threshold * 100}%"
-            )
-            period_data.append(decrease_df)
-    return period_data
 from typing import List
-def prepare_report_data( 
-    df: pd.DataFrame ,                   
-    lookback_periods: List[str],
-    increase_thresholds: List[float],
-    decrease_thresholds: List[float],
 
-    columns: List[str],
-    ) -> List[dict]:
-    final_output_data = {}
-    for period in lookback_periods:
-        final_output_columns = columns + [
-            f"{period}_return",
-            f"{period}_SP500_return",
-        ]
-        period_data = filter_data_by_thresholds(
-            increase_thresholds, decrease_thresholds,period, df, final_output_columns, 
-        )
-
-        if period_data:
-            combined_df = pd.concat(period_data)
-            combined_df = combined_df.sort_values(
-                by=f"{period}_return", ascending=False
-            )
-            
-            final_output_data[period] = combined_df.to_dict(orient="records")
-    return final_output_data
-    
-def generate_html_report(df: pd.DataFrame,
-    lookback_periods: list,
-    increase_thresholds: list,
-    decrease_thresholds: list,
-    report_date_str: str,
-    columns: List[str],
-    report_name: str) ->None:
-
-
-    report_data = prepare_report_data(
-        df,
-        lookback_periods,
-        increase_thresholds,
-        decrease_thresholds,
-        columns,
-    )
-    df.to_csv(f"data/{report_name}.csv")
-    html_content = generate_market_scanner_html_report(report_data,report_date_str,report_name)
-    logger.info(f"Report generated successfully: {report_name}")
-    return html_content
-    
-
-    
-def generate_excel_report(
-    df: pd.DataFrame,
-    lookback_periods: list,
-    increase_thresholds: list,
-    decrease_thresholds: list,
-    report_date_str: str,
-    columns: List[str],
-    report_name: str,
-) -> None:
-    logger.info("Generating report.")
-    """
-    Generate a report showing the increase and decrease for each threshold for all lookback periods.
-    
-    Parameters:
-        df (pd.DataFrame): DataFrame with returns for each ticker and time period.
-        lookback_periods (list): List of periods for which to calculate returns.
-        increase_thresholds (list): List of increase thresholds.
-        decrease_thresholds (list): List of decrease thresholds.
-    """
-    report_filename = f"reports/{report_name}_{report_date_str}.xlsx"
-
-    with pd.ExcelWriter(report_filename, engine="xlsxwriter") as writer:
-
-        for period in lookback_periods:
-            final_output_columns = columns + [
-                f"{period}_return",
-                f"{period}_SP500_return",
-            ]
-            period_data = []
-
-           
-            increase_df = filter_data_by_thresholds(
-                increase_thresholds, period, df, final_output_columns, "Increase"
-            )
-            period_data.append(increase_df)
-
-            decrease_df = filter_data_by_thresholds(
-                decrease_thresholds, period, df, final_output_columns, "Decrease"
-            )   
-            period_data.append(decrease_df)
-
-            if period_data:
-                combined_df = pd.concat(period_data)
-                combined_df = combined_df.sort_values(
-                    by=f"{period}_return", ascending=False
-                )
-                combined_df.to_excel(writer, sheet_name=period, index=False)
-
-                # Format the worksheet
-                workbook = writer.book
-                worksheet = writer.sheets[period]
-                try:
-                    format_worksheet(workbook, worksheet, combined_df)
-                except Exception as e:
-                    logger.error(
-                        f"Error formatting worksheet for period {period}: {e}"
-                    )
-
-    logger.info(f"Report generated successfully: {report_filename}")
-
-
-def generate_watch_list_report(
-    df: pd.DataFrame, report_date_str: str, report_name: str
-) -> None:
-    logger.info("Generating watchlist report.")
-    """
-    Generate a report showing the increase and decrease for each threshold for all lookback periods.
-    
-    Parameters:
-        df (pd.DataFrame): DataFrame with returns for each ticker and time period.
-        lookback_periods (list): List of periods for which to calculate returns.
-        increase_thresholds (list): List of increase thresholds.
-        decrease_thresholds (list): List of decrease thresholds.
-    """
-    beginning_cols = ["Ticker", "CompanyName", "Sector", "Industry"]
-    output_columns = beginning_cols + [c for c in df.columns if c not in beginning_cols]
-    df = df[output_columns]
-    report_filename = f"reports/{report_name}_{report_date_str}.xlsx"
-
-    with pd.ExcelWriter(report_filename, engine="xlsxwriter") as writer:
-        df.to_excel(writer, sheet_name="watchlist", index=False)
-        # Format the worksheet
-        workbook = writer.book
-        worksheet = writer.sheets["watchlist"]
-        try:
-            format_worksheet(workbook, worksheet, df)
-        except Exception as e:
-            logger.error(f"Error formatting worksheet  {e}")
-
-    logger.info(f"Watchlist Report generated successfully: {report_filename}")
 
 
 enrich_mapping = {"^GSPC": "S&P 500", "^IXIC": "NASDAQ"}
@@ -567,8 +201,9 @@ def ticker_data_processing(
         if ticker in enrich_mapping and model == IndexPrice:
             new_ticker_df["Name"] = enrich_mapping[ticker]
         new_records = new_ticker_df.to_dict(orient="records")[0]
-        records_to_update = {k: v for k, v in new_records.items() if k in ["Close"]}
-        update_data_in_sqlite(
+        columns = ['Date','Ticker','Close','Name']
+        records_to_update = {k: v for k, v in new_records.items() if k in columns}
+        upsert_data_in_sqlite(
             model,
             records_to_update,
             filters={"Ticker": ticker, "Date": start_date},
@@ -609,7 +244,7 @@ def fetch_sp500_data(
         new_sp500_data = fetch_stock_data(
             "^GSPC", start_date=start_date, end_date=end_date
         )
-        update_data_in_sqlite(
+        upsert_data_in_sqlite(
             SP500Holdings,
             new_sp500_data.to_dict(orient="records"),
             date_range={start_date, end_date},
@@ -720,51 +355,6 @@ def get_top_gainers(
     return result_df
 
 
-def send_email(
-    recipient: str,
-    subject: str,
-    body: str,
-    report_path: Optional[str] = None,
-    html_content: Optional[str] = None,
-) -> None:
-    logger.info(f"Sending email to {recipient} with subject '{subject}'.")
-    """
-    Send an email with the report attached.
-
-    Parameters:
-        report_path (str): Path to the report file.
-        recipient (str): Recipient's email address.
-        subject (str): Subject of the email.
-        body (str): Body of the email.
-    """
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_ADDRESS
-    msg["To"] = recipient
-    msg.set_content(body)
-    if html_content:
-        msg.add_alternative(html_content, subtype="html")
-
-    if report_path:
-        # Attach the report
-        with open(report_path, "rb") as f:
-            file_data = f.read()
-            file_name = os.path.basename(report_path)
-        msg.add_attachment(
-            file_data,
-            maintype="application",
-            subtype="octet-stream",
-            filename=file_name,
-        )
-
-    # Send the email
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-            smtp.send_message(msg)
-        logger.info("Email sent successfully.")
-    except Exception as e:
-        logger.error(f"Error sending email: {e}")
 
 
 def generate_market_scanner_report(
@@ -829,9 +419,7 @@ def generate_market_scanner_report(
     )
 
 
-def get_all_tickers():
-    all_tickers = read_data_from_sqlite(StocksPrice)
-    return set(all_tickers["Ticker"].unique())
+
 
 
 def generate_user_specific_report(
@@ -966,106 +554,48 @@ def main():
     date_range = pd.date_range(start=args.start_date, end=args.end_date)
     all_tickers = get_all_tickers()
     for current_date in date_range:
-        generate_market_scanner_report(
-            sp500_tickers,
-            lookback_periods,
-            increase_thresholds,
-            decrease_thresholds,
-            args,
-            current_date,
-            report_name="SP500 Market Scanner",
-            all_tickers=all_tickers,
-        )
-        generate_market_scanner_report(
-            only_nasdaq_tickers,
-            lookback_periods,
-            increase_thresholds,
-            decrease_thresholds,
-            args,
-            current_date,
-            report_name="NASDAQ Market Scanner",
-            all_tickers=all_tickers,
-        )
-        generate_user_specific_report(
-            watchlist_tickers, lookback_periods, args, current_date, all_tickers
-        )
+        # generate_market_scanner_report(
+        #     sp500_tickers,
+        #     lookback_periods,
+        #     increase_thresholds,
+        #     decrease_thresholds,
+        #     args,
+        #     current_date,
+        #     report_name="SP500 Market Scanner",
+        #     all_tickers=all_tickers,
+        # )
+        # generate_market_scanner_report(
+        #     only_nasdaq_tickers,
+        #     lookback_periods,
+        #     increase_thresholds,
+        #     decrease_thresholds,
+        #     args,
+        #     current_date,
+        #     report_name="NASDAQ Market Scanner",
+        #     all_tickers=all_tickers,
+        # )
+        # generate_user_specific_report(
+        #     watchlist_tickers, lookback_periods, args, current_date, all_tickers
+        # )
         generate_broad_market_report(broadmarket_etf_list,lookback_periods,args,current_date,all_tickers)
     logger.info("Script completed successfully.")
 
 
-def load_sp500_data():
-    sp500_tickers = read_tickers(SP500Holdings)
-    for each_ticker in sp500_tickers:
-        df = fetch_stock_data(each_ticker, "1y")
-        df["IndexName"] = "sp500"
-        write_data_to_sqlite(StocksPrice, df)
 
-
-def load_nasdaq_data(sp500_tickers):
-    nasdaq_tickers = read_tickers(NASDAQHoldings)
-    nasdaq_tickers = [
-        ticker for ticker in nasdaq_tickers if ticker not in sp500_tickers
-    ]
-    for each_ticker in nasdaq_tickers:
-        try:
-            df = fetch_stock_data(each_ticker, "1y")
-            df["IndexName"] = "nasdaq"
-            df = df.rename(columns={"Stock Splits": "StockSplits"})
-            write_data_to_sqlite(StocksPrice, df)
-        except Exception as e:
-            print(f"Error fetching data for {each_ticker}: {e}")
-            continue
-
-
-def initial_laod():
-    load_sp500_data()
-    sp500_tickers = read_tickers(SP500Holdings)
-    load_nasdaq_data(sp500_tickers)
 
 
 # TODO 1. add sector to the report
 # TODO 2. add company name to the report
 if __name__ == "__main__":
-    # data = pd.read_csv('data/broad_market_etfs.csv')
-    # report_date = "2025-01-09"
-    # res = generate_broad_market_monitoring_report_html(data, report_date)
-    # send_email("hgao62@uwo.ca", "Broad Market Monitoring Report", "",html_content=res)
-
-
+ 
     alert_emails = os.getenv("ALERT_EMAILS").split(",")
-    # load_nasdaq_data(sp500_tickers )
-    # df = pd.read_csv("data/SP500 Market Scanner.csv")
-    # lookback_periods = [
-    #     "1d",
-    #     "3d",
-    #     "5d",
-    #     "14d",
-    #     "21d",
-    #     "1mo",
-    #     "2mo",
-    #     "3mo",
-    #     "4mo",
-    #     "5mo",
-    #     "6mo",
-    #     "1y",
-    # ]
-    # increase_thresholds = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
-    # decrease_thresholds = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 2]
-    # columns =  [
-    #     "Ticker",
-    #     "CompanyName",
-    #     "Sector",
-    #     "Industry",
-    # ]
-    # res =prepare_report_data(df,lookback_periods,increase_thresholds,decrease_thresholds,columns)
-    # html_content = generate_market_scanner_html_report(res,"2024-01-09","Market Scanner")
-    # send_email("hgao62@uwo.ca","test","test",html_content=html_content)
-    
+
     try:
         main()
     except Exception as e:
+        traceback_str = traceback.format_exc()
         send_email(
             recipient=alert_emails,
             subject="Stock Analysis Report - Error",
-            body=f"An error occurred while running the stock analysis script. {str(e)}",
+            body=f"An error occurred while running the stock analysis script.\n{traceback_str}",
         )

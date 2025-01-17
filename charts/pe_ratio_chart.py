@@ -8,98 +8,187 @@ data = pd.read_csv('./data/sp500_pe_data.csv')
 # Filter out rows with missing PE ratio values
 data = data.round(2)
 
+# Calculate sector averages
+sector_avg = data.groupby('Sector')['PERatio'].agg(['mean', 'count']).reset_index()
+sector_avg['mean'] = sector_avg['mean'].round(2)
+
+# Sort sector averages by mean PE ratio (descending)
+sector_avg = sector_avg.sort_values('mean', ascending=True)
+
+# Define sector colors
+sector_colors = {
+    'Technology': '#2E86C1',
+    'Healthcare': '#27AE60',
+    'Financial Services': '#8E44AD',
+    'Consumer Cyclical': '#E74C3C',
+    'Industrials': '#F39C12',
+    'Communication Services': '#16A085',
+    'Consumer Defensive': '#2C3E50',
+    'Energy': '#E67E22',
+    'Basic Materials': '#9B59B6',
+    'Real Estate': '#C0392B',
+    'Utilities': '#1ABC9C'
+}
+
+# Create sector average PE ratio chart with updated styling
+fig_sector = go.Figure()
+fig_sector.add_trace(go.Bar(
+    name='Sector Average PE',
+    y=sector_avg['Sector'],
+    x=sector_avg['mean'],
+    text=sector_avg['mean'].round(1),
+    textposition='outside',  # Changed to outside
+    orientation='h',
+    marker=dict(
+        color=sector_avg['mean'],  # Color based on value
+        colorscale='RdYlBu',      # Red-Yellow-Blue color scale
+        reversescale=True,        # Reverse the color scale
+        showscale=True,           # Show the color scale
+        colorbar=dict(
+            title="PE Ratio",
+            thickness=15,
+            len=0.5,
+            x=0.85,
+            y=0.5
+        )
+    ),
+    hovertemplate="<b>%{y}</b><br>Average PE: %{x:.1f}<br>Companies: " + sector_avg['count'].astype(str) + "<extra></extra>"
+))
+
+# Update sector chart layout with increased height
+fig_sector.update_layout(
+    title=dict(
+        text="Average PE Ratio by Sector",
+        x=0.5,
+        y=0.95,
+        font=dict(size=20)
+    ),
+    height=600,  # Increased from 500 to 700
+    margin=dict(l=180, r=100, t=80, b=40),
+    xaxis=dict(
+        title="PE Ratio",
+        titlefont=dict(size=14),
+        tickfont=dict(size=12)
+    ),
+    yaxis=dict(
+        title=None,
+        tickfont=dict(size=12)
+    ),
+    showlegend=False,
+    plot_bgcolor='white',
+    paper_bgcolor='white'
+)
+
 # Get the top 10 companies with the highest PE ratio
 top_10_highest_pe = data.nlargest(10, 'PERatio')
+# Merge with sector averages
+top_10_highest_pe = top_10_highest_pe.merge(sector_avg[['Sector', 'mean']], on='Sector', how='left')
+
+# Sort highest PE data by PE ratio (descending)
+top_10_highest_pe = top_10_highest_pe.sort_values('PERatio', ascending=True)
 
 # Get the top 10 companies with the lowest PE ratio
 top_10_lowest_pe = data.nsmallest(10, 'PERatio')
+# Merge with sector averages
+top_10_lowest_pe = top_10_lowest_pe.merge(sector_avg[['Sector', 'mean']], on='Sector', how='left')
 
-# Calculate sector averages
-sector_avg = data.groupby('Sector')['PERatio'].mean().round(2).sort_values(ascending=True)
+# Sort lowest PE data by PE ratio (ascending)
+top_10_lowest_pe = top_10_lowest_pe.sort_values('PERatio', ascending=False)
 
-# Create a bar chart for the top 10 companies with the highest PE ratio
+# Create bar chart for highest PE ratios
 fig_highest = go.Figure()
+
+# Add bars for company PE ratios
 fig_highest.add_trace(go.Bar(
-    y=top_10_highest_pe['CompanyName'],  # Switch to y-axis for horizontal bars
-    x=top_10_highest_pe['PERatio'],      # Switch to x-axis for horizontal bars
-    text=top_10_highest_pe['PERatio'].round(2),
+    name='Company PE',
+    y=top_10_highest_pe['CompanyName'],
+    x=top_10_highest_pe['PERatio'],
+    text=top_10_highest_pe['PERatio'].round(1),
     textposition='auto',
-    orientation='h',                      # Set horizontal orientation
+    orientation='h',
     marker_color='red',
-    hovertemplate="Company: %{y}<br>PE Ratio: %{x}<br>Sector: " + top_10_highest_pe['Sector'] + "<extra></extra>"
+    width=0.4,
+    hovertemplate="Company: %{y}<br>PE Ratio: %{x:.1f}<extra></extra>"
 ))
 
-# Update layout for better readability
-fig_highest.update_layout(
-    title={
-        'text': 'Top 10 Companies with Highest PE Ratio',
-        'y':0.95,
-        'x':0.5,
-        'xanchor': 'center',
-        'yanchor': 'top'
-    },
-    xaxis_title='PE Ratio',
-    yaxis_title=None,                     # Remove y-axis title
-    yaxis={'categoryorder':'total ascending'},  # Sort bars
-    height=500,
-    margin=dict(l=20, r=20, t=40, b=20),
-    showlegend=False
-)
-
-# Create a bar chart for the top 10 companies with the lowest PE ratio
-fig_lowest = go.Figure()
-fig_lowest.add_trace(go.Bar(
-    y=top_10_lowest_pe['CompanyName'],    # Switch to y-axis for horizontal bars
-    x=top_10_lowest_pe['PERatio'],        # Switch to x-axis for horizontal bars
-    text=top_10_lowest_pe['PERatio'].round(2),
-    textposition='auto',
-    orientation='h',                       # Set horizontal orientation
-    marker_color='green',
-    hovertemplate="Company: %{y}<br>PE Ratio: %{x}<br>Sector: " + top_10_lowest_pe['Sector'] + "<extra></extra>"
-))
-
-# Update layout for better readability
-fig_lowest.update_layout(
-    title={
-        'text': 'Top 10 Companies with Lowest PE Ratio',
-        'y':0.95,
-        'x':0.5,
-        'xanchor': 'center',
-        'yanchor': 'top'
-    },
-    xaxis_title='PE Ratio',
-    yaxis_title=None,                      # Remove y-axis title
-    yaxis={'categoryorder':'total ascending'},   # Sort bars
-    height=500,
-    margin=dict(l=20, r=20, t=40, b=20),
-    showlegend=False
-)
-
-# Create sector average PE ratio chart
-fig_sector = go.Figure()
-fig_sector.add_trace(go.Bar(
-    y=sector_avg.index,
-    x=sector_avg.values,
-    text=sector_avg.values,
+# Add bars for sector averages
+fig_highest.add_trace(go.Bar(
+    name='Sector Average',
+    y=top_10_highest_pe['CompanyName'],
+    x=top_10_highest_pe['mean'],
+    text=top_10_highest_pe['mean'].round(1),
     textposition='auto',
     orientation='h',
     marker_color='navy',
-    hovertemplate="Sector: %{y}<br>Average PE: %{x:.1f}<extra></extra>"
+    width=0.4,
+    hovertemplate="Sector: " + top_10_highest_pe['Sector'] + "<br>Sector Avg PE: %{x:.1f}<extra></extra>"
 ))
 
-fig_sector.update_layout(
-    title={
-        'text': 'Average PE Ratio by Sector',
-        'y':0.95,
-        'x':0.5,
-        'xanchor': 'center',
-        'yanchor': 'top'
-    },
-    xaxis_title='PE Ratio',
-    yaxis_title=None,
-    height=500,
-    margin=dict(l=20, r=20, t=40, b=20),
-    showlegend=False
+# Update layout for highest PE ratio figure
+fig_highest.update_layout(
+    title_text="Top 10 Companies with Highest PE Ratio vs Sector Average",
+    title_x=0.5,
+    barmode='group',
+    height=600,
+    showlegend=True,
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="right",
+        x=1
+    ),
+    margin=dict(l=20, r=20, t=60, b=20),
+    xaxis_title="PE Ratio",
+    yaxis_title=None
+)
+
+# Create bar chart for lowest PE ratios
+fig_lowest = go.Figure()
+
+# Add bars for company PE ratios
+fig_lowest.add_trace(go.Bar(
+    name='Company PE',
+    y=top_10_lowest_pe['CompanyName'],
+    x=top_10_lowest_pe['PERatio'],
+    text=top_10_lowest_pe['PERatio'].round(1),
+    textposition='auto',
+    orientation='h',
+    marker_color='green',
+    width=0.4,
+    hovertemplate="Company: %{y}<br>PE Ratio: %{x:.1f}<extra></extra>"
+))
+
+# Add bars for sector averages
+fig_lowest.add_trace(go.Bar(
+    name='Sector Average',
+    y=top_10_lowest_pe['CompanyName'],
+    x=top_10_lowest_pe['mean'],
+    text=top_10_lowest_pe['mean'].round(1),
+    textposition='auto',
+    orientation='h',
+    marker_color='navy',
+    width=0.4,
+    hovertemplate="Sector: " + top_10_lowest_pe['Sector'] + "<br>Sector Avg PE: %{x:.1f}<extra></extra>"
+))
+
+# Update layout for lowest PE ratio figure
+fig_lowest.update_layout(
+    title_text="Top 10 Companies with Lowest PE Ratio vs Sector Average",
+    title_x=0.5,
+    barmode='group',
+    height=600,
+    showlegend=True,
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="right",
+        x=1
+    ),
+    margin=dict(l=20, r=20, t=60, b=20),
+    xaxis_title="PE Ratio",
+    yaxis_title=None
 )
 
 # Ensure the output directory exists
@@ -150,13 +239,13 @@ html_template = """
 <body>
     <h1>PE Ratio Analysis Dashboard</h1>
     <div class="chart-container">
-        <iframe src="sector_pe_ratio.html" width="100%" height="500px" style="border:none;"></iframe>
+        <iframe src="sector_pe_ratio.html" width="100%" height="700px" style="border:none;"></iframe>
     </div>
     <div class="chart-container">
-        <iframe src="top_10_highest_pe.html" width="100%" height="500px" style="border:none;"></iframe>
+        <iframe src="top_10_highest_pe.html" width="100%" height="600px" style="border:none;"></iframe>
     </div>
     <div class="chart-container">
-        <iframe src="top_10_lowest_pe.html" width="100%" height="500px" style="border:none;"></iframe>
+        <iframe src="top_10_lowest_pe.html" width="100%" height="600px" style="border:none;"></iframe>
     </div>
 </body>
 </html>

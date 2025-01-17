@@ -89,3 +89,21 @@ class BroadMarketETFList(Base):
     Name = Column(String)
     Sector = Column(String)
     Asset_Class = Column(String)
+    
+    
+class TickerInfo(Base):
+    __tablename__ = 'TickerInfo'
+    Ticker = Column(String, primary_key=True)
+    CompanyName = Column(String)
+    Sector = Column(String)
+    Industry = Column(String)
+    Country = Column(String)
+    MarketCap = Column(Float)
+    PERatio = Column(Float)
+    ForwardPERatio = Column(Float)
+    Dividend = Column(Float)
+    ROE = Column(Float)
+    ROA = Column(Float)
+    Description = Column(String)
+    Website = Column(String)
+    LastUpdated = Column(Date)

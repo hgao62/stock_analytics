@@ -60,5 +60,5 @@ def main():
 
 
 if __name__ == "__main__":
-   load_csv_into_db(r"C:\development\repo\stock_analytics\data\static_data\Broad_Market_ETFs.csv",models.BroadMarketETFList)
+   load_csv_into_db(r"C:\development\repo\stock_analytics\data\static_data\updated_etf_list.csv",models.BroadMarketETFList)
 
