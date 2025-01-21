@@ -554,29 +554,29 @@ def main():
     date_range = pd.date_range(start=args.start_date, end=args.end_date)
     all_tickers = get_all_tickers()
     for current_date in date_range:
-        # generate_market_scanner_report(
-        #     sp500_tickers,
-        #     lookback_periods,
-        #     increase_thresholds,
-        #     decrease_thresholds,
-        #     args,
-        #     current_date,
-        #     report_name="SP500 Market Scanner",
-        #     all_tickers=all_tickers,
-        # )
-        # generate_market_scanner_report(
-        #     only_nasdaq_tickers,
-        #     lookback_periods,
-        #     increase_thresholds,
-        #     decrease_thresholds,
-        #     args,
-        #     current_date,
-        #     report_name="NASDAQ Market Scanner",
-        #     all_tickers=all_tickers,
-        # )
-        # generate_user_specific_report(
-        #     watchlist_tickers, lookback_periods, args, current_date, all_tickers
-        # )
+        generate_market_scanner_report(
+            sp500_tickers,
+            lookback_periods,
+            increase_thresholds,
+            decrease_thresholds,
+            args,
+            current_date,
+            report_name="SP500 Market Scanner",
+            all_tickers=all_tickers,
+        )
+        generate_market_scanner_report(
+            only_nasdaq_tickers,
+            lookback_periods,
+            increase_thresholds,
+            decrease_thresholds,
+            args,
+            current_date,
+            report_name="NASDAQ Market Scanner",
+            all_tickers=all_tickers,
+        )
+        generate_user_specific_report(
+            watchlist_tickers, lookback_periods, args, current_date, all_tickers
+        )
         generate_broad_market_report(broadmarket_etf_list,lookback_periods,args,current_date,all_tickers)
     logger.info("Script completed successfully.")
 
@@ -594,6 +594,7 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         traceback_str = traceback.format_exc()
+        logger.error(f"An error occurred while running the stock analysis script: {e}")
         send_email(
             recipient=alert_emails,
             subject="Stock Analysis Report - Error",

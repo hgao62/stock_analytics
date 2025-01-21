@@ -63,6 +63,7 @@ HTML_TEMPLATE = """
                     <th class="ticker-column">Ticker</th>
                     <th class="name-column">Name</th>
                     <th class="return-column">1 Day</th>
+                    <th class="return-column">3 Day</th>
                     <th class="return-column">5 Day</th>
                     <th class="return-column">1 Month</th>
                     <th class="return-column">2 Month</th>
@@ -77,6 +78,9 @@ HTML_TEMPLATE = """
                     <td class="name-column">{{ item['Name'] }}</td>
                     <td class="return-column {{ 'positive' if item['1d_return'] > 0 else 'negative' }}">
                         {{ '%.2f%%' % (item['1d_return'] * 100) }}
+                    </td>
+                    <td class="return-column {{ 'positive' if item['3d_return'] > 0 else 'negative' }}">
+                        {{ '%.2f%%' % (item['3d_return'] * 100) }}
                     </td>
                     <td class="return-column {{ 'positive' if item['5d_return'] > 0 else 'negative' }}">
                         {{ '%.2f%%' % (item['5d_return'] * 100) }}
