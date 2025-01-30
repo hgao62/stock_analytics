@@ -147,18 +147,11 @@ def generate_excel_report(
                 f"{period}_return",
                 f"{period}_SP500_return",
             ]
-            period_data = []
-
-           
-            increase_df = filter_data_by_thresholds(
-                increase_thresholds, period, df, final_output_columns, "Increase"
-            )
-            period_data.append(increase_df)
-
-            decrease_df = filter_data_by_thresholds(
-                decrease_thresholds, period, df, final_output_columns, "Decrease"
-            )   
-            period_data.append(decrease_df)
+        
+            period_data  = filter_data_by_thresholds(
+            increase_thresholds, decrease_thresholds,period, df, final_output_columns, 
+        )
+            
 
             if period_data:
                 combined_df = pd.concat(period_data)

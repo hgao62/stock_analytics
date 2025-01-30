@@ -29,7 +29,10 @@ from sqlitedb.update import upsert_data_in_sqlite
 from data.watchlist import get_user_tickers
 from data.utilities import send_email,format_worksheet,get_neighbour_days,fetch_stock_data,read_tickers,get_all_tickers
 from data.report_generating import generate_html_report,generate_excel_report,generate_watch_list_report,generate_market_scanner_html_report
-import traceback  # Add this import
+import traceback  
+from extract_my_ib_return import load_positions
+
+# Add this import
 # load environment variable
 load_dotenv()
 # Email configuration
@@ -77,7 +80,17 @@ def calculate_returns(
 
     for period in periods:
         try:
-            start_date = (report_date - timedelta(days=period_days[period])).date()
+            if period in ['1d', '3d', '5d']:
+                # Use trading days for 1d, 3d, 5d periods
+                start_date = report_date
+                trading_days = 0
+                while trading_days < period_days[period]:
+                    start_date -= timedelta(days=1)
+                    if start_date.weekday() < 5:  # Monday to Friday are trading days
+                        trading_days += 1
+                start_date = start_date.date()
+            else:
+                start_date = (report_date - timedelta(days=period_days[period])).date()
         except Exception as e:
             logger.error(
                 f"Error calculating start_date for {ticker} during {period}: {e}"
@@ -208,6 +221,9 @@ def ticker_data_processing(
             records_to_update,
             filters={"Ticker": ticker, "Date": start_date},
         )
+        ticker_df = read_data_from_sqlite(model, filters={"Ticker": ticker})
+        ticker_df = ticker_df.sort_values(by="Date")
+    elif mode == "db_rerun":
         ticker_df = read_data_from_sqlite(model, filters={"Ticker": ticker})
         ticker_df = ticker_df.sort_values(by="Date")
     return ticker_df
@@ -366,6 +382,7 @@ def generate_market_scanner_report(
     current_date,
     report_name: str,
     all_tickers: List[str],
+    format :str ='html'
 ) -> None:
     top_gainers = get_top_gainers(
         sp500_tickers,
@@ -383,24 +400,14 @@ def generate_market_scanner_report(
 
     # Enrich top_gainers with sector and industry information
     top_gainers = enrich_with_sector_industry(top_gainers)
-
-    report_path = f"reports/{report_name}_{current_date_str}.xlsx"
     column_output = [
-        "Ticker",
-        "CompanyName",
-        "Sector",
-        "Industry",
-    ]
-    # generate_excel_report(
-    #     top_gainers,
-    #     lookback_periods,
-    #     increase_thresholds,
-    #     decrease_thresholds,
-    #     current_date_str,
-    #     column_output,
-    #     report_name,
-    # )
-    html_content = generate_html_report(top_gainers,
+            "Ticker",
+            "CompanyName",
+            "Sector",
+            "Industry",
+        ]
+    if format == 'html':
+        html_content = generate_html_report(top_gainers,
         lookback_periods,
         increase_thresholds,
         decrease_thresholds,
@@ -408,12 +415,31 @@ def generate_market_scanner_report(
         column_output,
         report_name
     )
-    send_email(
+        send_email(
         recipient=args.recipient,
         subject=f"{report_name} Report {current_date_str}",
         body="",
         html_content=html_content,
     )
+    elif format == 'excel':
+        report_path = f"reports/{report_name}_{current_date_str}.xlsx"
+        
+        generate_excel_report(
+            top_gainers,
+            lookback_periods,
+            increase_thresholds,
+            decrease_thresholds,
+            current_date_str,
+            column_output,
+            report_name,
+        )
+        send_email(
+        recipient=args.recipient,
+        subject=f"{report_name} Report {current_date_str}",
+        body="",
+        report_path=report_path,
+    )
+    
     logger.info(
         f"Market scanner Report for {current_date_str} generated and emailed successfully."
     )
@@ -423,7 +449,7 @@ def generate_market_scanner_report(
 
 
 def generate_user_specific_report(
-    tickers, lookback_periods: list, args, current_date, all_tickers: List[str] = None
+    tickers, lookback_periods: list, args, current_date, report_name, all_tickers: List[str] = None
 ) -> None:
 
     top_gainers = get_top_gainers(
@@ -442,7 +468,6 @@ def generate_user_specific_report(
 
     # Enrich top_gainers with sector and industry information
     top_gainers = enrich_with_sector_industry(top_gainers)
-    report_name = "Watchlist Report"
     report_path = f"reports/{report_name}_{current_date_str}.xlsx"
 
     generate_watch_list_report(top_gainers, current_date_str, report_name)
@@ -499,7 +524,7 @@ def main():
     parser = argparse.ArgumentParser(description="Stock Analytics Script")
     parser.add_argument(
         "--mode",
-        choices=["initial", "daily", "rerun"],
+        choices=["initial", "daily", "rerun","db_rerun"],
         required=True,
         help="Mode to run the process: initial, daily, or rerun",
     )
@@ -548,6 +573,7 @@ def main():
         ticker for ticker in nasdaq_tickers if ticker not in sp500_tickers
     ]
     watchlist_tickers = get_user_tickers("kobegao")
+    ib_tickers = load_positions()
     broadmarket_etf_list = read_tickers(BroadMarketETFList)
     logger.info(f"Fetched {len(sp500_tickers)} S&P 500 tickers.")
 
@@ -563,6 +589,7 @@ def main():
             current_date,
             report_name="SP500 Market Scanner",
             all_tickers=all_tickers,
+            format='excel'
         )
         generate_market_scanner_report(
             only_nasdaq_tickers,
@@ -573,9 +600,13 @@ def main():
             current_date,
             report_name="NASDAQ Market Scanner",
             all_tickers=all_tickers,
+            format='excel'
         )
         generate_user_specific_report(
-            watchlist_tickers, lookback_periods, args, current_date, all_tickers
+            watchlist_tickers, lookback_periods, args, current_date, "Watchlist Report", all_tickers
+        )
+        generate_user_specific_report(
+            ib_tickers, lookback_periods, args, current_date,"IB account return report", all_tickers
         )
         generate_broad_market_report(broadmarket_etf_list,lookback_periods,args,current_date,all_tickers)
     logger.info("Script completed successfully.")
@@ -594,7 +625,7 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         traceback_str = traceback.format_exc()
-        logger.error(f"An error occurred while running the stock analysis script: {e}")
+        logger.error(f"An error occurred while running the stock analysis script: {traceback_str}")
         send_email(
             recipient=alert_emails,
             subject="Stock Analysis Report - Error",
